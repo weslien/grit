@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build Multiplatform Binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [darwin, linux, windows]
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          OUTPUT_NAME="grit-${{ matrix.goos }}-${{ matrix.goarch }}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            OUTPUT_NAME="$OUTPUT_NAME.exe"
+          fi
+          go build -o $OUTPUT_NAME
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries
+          path: |
+            grit-*
+
+  release:
+    name: Create Release
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: binaries
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            grit-*
+
+  homebrew:
+    name: Update Homebrew Formula
+    needs: [release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: gustav-weslien/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Generate Formula
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          SHA256=$(sha256sum grit-darwin-amd64 | awk '{print $1}')
+          
+          cat > homebrew-tap/Formula/grit.rb <<EOF
+          class Grit < Formula
+            desc "Go-based monorepo tool"
+            homepage "https://github.com/gustav-weslien/grit"
+            url "https://github.com/gustav-weslien/grit/releases/download/v#{version}/grit-darwin-amd64"
+            sha256 "$SHA256"
+            license "MIT"
+
+            def install
+              bin.install "grit-darwin-amd64" => "grit"
+            end
+
+            test do
+              system "#{bin}/grit", "--version"
+            end
+          end
+          EOF
+
+      - name: Commit and Push
+        run: |
+          cd homebrew-tap
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add Formula/grit.rb
+          git commit -m "Update grit to v${VERSION}"
+          git push

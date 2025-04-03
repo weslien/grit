@@ -1,0 +1,18 @@
+targets:
+  build: ""
+  install: ""
+  run: ""
+  mod: ""
+  test: ""
+  lint: ""
+  coverage: ""
+  clean: ""
+  all: ""
+
+package:
+  name: ""
+  version: "0.1.0"
+  dependencies: []
+  hash: ""
+
+# Add build system mappings
