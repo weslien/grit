@@ -8,13 +8,13 @@ import (
 )
 
 // Config operations
-func LoadConfig(path string) (*Config, error) {
+func LoadConfig(path string) (*RootConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return &Config{Types: make(map[string]TypeConfig)}, nil
+		return &RootConfig{Types: make(map[string]TypeConfig)}, nil
 	}
 
-	var config Config
+	var config RootConfig
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse config: %w", err)
 	}
@@ -25,7 +25,7 @@ func LoadConfig(path string) (*Config, error) {
 	return &config, nil
 }
 
-func SaveConfig(config *Config, path string) error {
+func SaveConfig(config *RootConfig, path string) error {
 	data, err := yaml.Marshal(config)
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
@@ -33,13 +33,13 @@ func SaveConfig(config *Config, path string) error {
 	return os.WriteFile(path, data, 0644)
 }
 
-func (c *Config) MergeDefaults(defaults TypeConfig) {
+func (c *RootConfig) MergeDefaults(defaults TypeConfig) {
 	if _, exists := c.Types["lib"]; !exists {
 		c.Types["lib"] = TypeConfig{
-			PackageDir:   "packages/lib",
-			BuildDir:     "build/lib",
-			CoverageDir:  "coverage/lib",
-			DefaultTasks: defaults.DefaultTasks,
+			PackageDir:  "packages/lib",
+			BuildDir:    "build/lib",
+			CoverageDir: "coverage/lib",
+			Targets:     defaults.Targets,
 		}
 	}
 }

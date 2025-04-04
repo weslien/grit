@@ -61,22 +61,51 @@ func parsePackageFile(path string) (*Package, error) {
 	return &pkg, err
 }
 
+/**
+ * The root grit.yaml config file
+ */
+type RootConfig struct {
+	Repo    RepoConfig            `yaml:"repo"`
+	Targets map[string]string     `yaml:"targets"`
+	Types   map[string]TypeConfig `yaml:"types"`
+}
+
+/**
+ * The config for a package type
+ */
+type TypeConfig struct {
+	PackageDir  string            `yaml:"package_dir"`
+	BuildDir    string            `yaml:"build_dir"`
+	CoverageDir string            `yaml:"coverage_dir"`
+	Targets     map[string]string `yaml:"targets"`
+	CanDependOn []string          `yaml:"can_depend_on"`
+}
+
+/**
+ * The grit.yaml config file for a package
+ */
 type Config struct {
-	Targets []string              `yaml:"targets"`
+	Targets map[string]string     `yaml:"targets"`
 	Types   map[string]TypeConfig `yaml:"types"`
 	Package PackageConfig         `yaml:"package"`
 }
 
-type TypeConfig struct {
-	PackageDir   string            `yaml:"packageDir"`
-	BuildDir     string            `yaml:"buildDir"`
-	CoverageDir  string            `yaml:"coverageDir"`
-	DefaultTasks map[string]string `yaml:"defaultTasks"`
-}
-
+/**
+ * The package config section
+ */
 type PackageConfig struct {
 	Version      string   `yaml:"version"`
 	Name         string   `yaml:"name"`
 	Dependencies []string `yaml:"dependencies"`
 	Hash         string   `yaml:"hash"`
+}
+
+/**
+ * The repo config section
+ */
+type RepoConfig struct {
+	URL     string `yaml:"url"`
+	Name    string `yaml:"name"`
+	License string `yaml:"license"`
+	Owner   string `yaml:"owner"`
 }

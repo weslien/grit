@@ -16,9 +16,72 @@ var newCmd = &cobra.Command{
 	Short: "Create a new package",
 	Long:  "Initialize a new package template with specified type and name",
 	Args:  cobra.ExactArgs(2),
-	Run: func(cmd *cobra.Command, args []string) {
-		// TODO: Implement package creation logic
-		fmt.Printf("Creating %s package: %s\n", args[0], args[1])
+	RunE: func(cmd *cobra.Command, args []string) error {
+		typeName := args[0]
+		pkgName := args[1]
+		
+		// Load root config
+		config, err := loadRootConfig()
+		if err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
+		}
+		
+		// Check if type exists
+		typeConfig, exists := config.Types[typeName]
+		if !exists {
+			return fmt.Errorf("type '%s' does not exist", typeName)
+		}
+		
+		// Create package directory
+		pkgDir := filepath.Join(typeConfig.PackageDir, pkgName)
+		if err := os.MkdirAll(pkgDir, 0755); err != nil {
+			return fmt.Errorf("failed to create package directory: %w", err)
+		}
+		
+		// Create standard package subdirectories
+		subdirs := []string{
+			filepath.Join(pkgDir, "src"),
+			filepath.Join(pkgDir, ".prompt"),
+			filepath.Join(pkgDir, ".mod"),
+			filepath.Join(pkgDir, ".dev"),
+			filepath.Join(pkgDir, ".ops"),
+		}
+		
+		for _, dir := range subdirs {
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				return fmt.Errorf("failed to create directory %s: %w", dir, err)
+			}
+		}
+		
+		// Create package config file
+		pkgConfig := &grit.Config{
+			Package: grit.PackageConfig{
+				Name:    pkgName,
+				Version: "0.1.0",
+			},
+			Targets: make(map[string]string),
+		}
+		
+		// Copy targets from type config
+		if typeConfig.Targets != nil {
+			for k, v := range typeConfig.Targets {
+				pkgConfig.Targets[k] = v
+			}
+		}
+		
+		// Save package config
+		pkgConfigData, err := yaml.Marshal(pkgConfig)
+		if err != nil {
+			return fmt.Errorf("failed to marshal package config: %w", err)
+		}
+		
+		if err := os.WriteFile(filepath.Join(pkgDir, "grit.yaml"), pkgConfigData, 0644); err != nil {
+			return fmt.Errorf("failed to write package config: %w", err)
+		}
+		
+		fmt.Fprintf(cmd.OutOrStdout(), "Creating %s package: %s\n", typeName, pkgName)
+		fmt.Fprintf(cmd.OutOrStdout(), "Package created at: %s\n", pkgDir)
+		return nil
 	},
 }
 
@@ -40,7 +103,7 @@ var newTypeCmd = &cobra.Command{
 			PackageDir:  filepath.Join("packages", typeName),
 			BuildDir:    filepath.Join("build", typeName),
 			CoverageDir: filepath.Join("coverage", typeName),
-			DefaultTasks: map[string]string{
+			Targets: map[string]string{
 				"build": "echo 'Implement build logic'",
 				"test":  "echo 'Implement test logic'",
 			},
@@ -75,12 +138,12 @@ func init() {
 	rootCmd.AddCommand(newCmd)
 }
 
-func loadRootConfig() (*grit.Config, error) {
+func loadRootConfig() (*grit.RootConfig, error) {
 	data, err := os.ReadFile("grit.yaml")
 	if err != nil {
-		return &grit.Config{Types: make(map[string]grit.TypeConfig)}, nil
+		return &grit.RootConfig{Types: make(map[string]grit.TypeConfig)}, nil
 	}
-	var config grit.Config
+	var config grit.RootConfig
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, err
 	}
@@ -90,7 +153,7 @@ func loadRootConfig() (*grit.Config, error) {
 	return &config, nil
 }
 
-func saveRootConfig(config *grit.Config) error {
+func saveRootConfig(config *grit.RootConfig) error {
 	data, err := yaml.Marshal(config)
 	if err != nil {
 		return err

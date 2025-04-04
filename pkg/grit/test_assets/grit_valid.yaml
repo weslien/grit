@@ -1,0 +1,17 @@
+types:
+  lib:
+    package_dir: "packages/lib"
+    targets:
+      build: "echo lib-build" # This will override the root level build target
+      test: "echo lib-test"
+targets:
+    build: "echo build"
+    test: "echo test"
+    lint: "echo lint"
+    release: "echo release"  
+repo:
+  name: "default"
+  version: "0.1.0"
+  url: ""
+
+# Add build system mappings

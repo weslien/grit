@@ -1,0 +1,15 @@
+types:
+  lib:
+targets: 
+  lib:
+    default_tasks:
+      - build
+      - test
+      - lint
+      - release
+repo:
+  name: "default"
+  version: "0.1.0"
+  url: ""
+
+# Add build system mappings

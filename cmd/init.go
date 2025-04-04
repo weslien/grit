@@ -54,10 +54,10 @@ var initCmd = &cobra.Command{
 		// Merge type configuration
 		if _, exists := existingConfig.Types["lib"]; !exists {
 			existingConfig.Types["lib"] = grit.TypeConfig{
-				PackageDir:   "packages/lib",
-				BuildDir:     "build/lib",
-				CoverageDir:  "coverage/lib",
-				DefaultTasks: templateConfig.DefaultTasks,
+				PackageDir:  "packages/lib",
+				BuildDir:    "build/lib",
+				CoverageDir: "coverage/lib",
+				Targets:     templateConfig.Targets,
 			}
 		}
 
