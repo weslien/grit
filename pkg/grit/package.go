@@ -1,10 +1,11 @@
 package grit
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"gopkg.in/yaml.v3" // Add this import
 )
 
 type Package struct {
@@ -12,6 +13,7 @@ type Package struct {
 	Version      string
 	Dependencies []Dependency
 	Hash         string
+	Path         string // Add this field to store the path to grit.yaml
 }
 
 type Dependency struct {
@@ -29,20 +31,22 @@ func NewPackageManager(root string) *PackageManager {
 	}
 }
 
-func (pm *PackageManager) LoadPackages() ([]Package, error) {
-	var packages []Package
+func (pm *PackageManager) LoadPackages() ([]Config, error) {
+	var packages []Config
 
 	err := filepath.Walk(pm.workspaceRoot, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-
+		//fmt.Printf("Checking %s\n", path)
 		if info.Name() == "grit.yaml" {
-			pkg, err := parsePackageFile(path)
+			//fmt.Printf("Found %s\n", path)
+			cfg, err := parsePackageFile(path)
 			if err != nil {
 				return fmt.Errorf("error parsing %s: %w", path, err)
 			}
-			packages = append(packages, *pkg)
+			//fmt.Printf("Loaded %s\n", cfg.Package.Name)
+			packages = append(packages, *cfg)
 		}
 		return nil
 	})
@@ -50,15 +54,22 @@ func (pm *PackageManager) LoadPackages() ([]Package, error) {
 	return packages, err
 }
 
-func parsePackageFile(path string) (*Package, error) {
+func parsePackageFile(path string) (*Config, error) {
+	//fmt.Printf("Parsing %s\n", path)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 
-	var pkg Package
-	err = json.Unmarshal(data, &pkg)
-	return &pkg, err
+	var cfg Config
+	err = yaml.Unmarshal(data, &cfg)
+	if err != nil {
+		return nil, err
+	}
+	//fmt.Printf("Parsed %s\n", cfg)
+	// Set the path to the grit.yaml file
+	cfg.Package.Path = path
+	return &cfg, nil
 }
 
 /**
@@ -87,17 +98,7 @@ type TypeConfig struct {
 type Config struct {
 	Targets map[string]string     `yaml:"targets"`
 	Types   map[string]TypeConfig `yaml:"types"`
-	Package PackageConfig         `yaml:"package"`
-}
-
-/**
- * The package config section
- */
-type PackageConfig struct {
-	Version      string   `yaml:"version"`
-	Name         string   `yaml:"name"`
-	Dependencies []string `yaml:"dependencies"`
-	Hash         string   `yaml:"hash"`
+	Package Package               `yaml:"package"`
 }
 
 /**

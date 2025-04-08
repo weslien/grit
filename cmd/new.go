@@ -19,25 +19,25 @@ var newCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		typeName := args[0]
 		pkgName := args[1]
-		
+
 		// Load root config
 		config, err := loadRootConfig()
 		if err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
 		}
-		
+
 		// Check if type exists
 		typeConfig, exists := config.Types[typeName]
 		if !exists {
 			return fmt.Errorf("type '%s' does not exist", typeName)
 		}
-		
+
 		// Create package directory
 		pkgDir := filepath.Join(typeConfig.PackageDir, pkgName)
 		if err := os.MkdirAll(pkgDir, 0755); err != nil {
 			return fmt.Errorf("failed to create package directory: %w", err)
 		}
-		
+
 		// Create standard package subdirectories
 		subdirs := []string{
 			filepath.Join(pkgDir, "src"),
@@ -46,39 +46,39 @@ var newCmd = &cobra.Command{
 			filepath.Join(pkgDir, ".dev"),
 			filepath.Join(pkgDir, ".ops"),
 		}
-		
+
 		for _, dir := range subdirs {
 			if err := os.MkdirAll(dir, 0755); err != nil {
 				return fmt.Errorf("failed to create directory %s: %w", dir, err)
 			}
 		}
-		
+
 		// Create package config file
 		pkgConfig := &grit.Config{
-			Package: grit.PackageConfig{
+			Package: grit.Package{
 				Name:    pkgName,
 				Version: "0.1.0",
 			},
 			Targets: make(map[string]string),
 		}
-		
+
 		// Copy targets from type config
 		if typeConfig.Targets != nil {
 			for k, v := range typeConfig.Targets {
 				pkgConfig.Targets[k] = v
 			}
 		}
-		
+
 		// Save package config
 		pkgConfigData, err := yaml.Marshal(pkgConfig)
 		if err != nil {
 			return fmt.Errorf("failed to marshal package config: %w", err)
 		}
-		
+
 		if err := os.WriteFile(filepath.Join(pkgDir, "grit.yaml"), pkgConfigData, 0644); err != nil {
 			return fmt.Errorf("failed to write package config: %w", err)
 		}
-		
+
 		fmt.Fprintf(cmd.OutOrStdout(), "Creating %s package: %s\n", typeName, pkgName)
 		fmt.Fprintf(cmd.OutOrStdout(), "Package created at: %s\n", pkgDir)
 		return nil
