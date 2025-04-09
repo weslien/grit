@@ -18,7 +18,7 @@ import (
 )
 
 var noCache bool
-var dirtyFlag bool  // Add this variable declaration
+var dirtyFlag bool // Add this variable declaration
 
 var buildCmd = &cobra.Command{
 	Use:   "build [type] [name]",
@@ -27,7 +27,7 @@ var buildCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		// Rename the formatter variable to avoid conflict with fmt package
 		formatter := output.New()
-		
+
 		cwd, err := os.Getwd()
 		if err != nil {
 			formatter.Error(fmt.Sprintf("Error getting current directory: %v", err))
@@ -37,7 +37,7 @@ var buildCmd = &cobra.Command{
 		formatter.Header("GRIT Build")
 		// In the buildCmd.Run function, after loading packages but before resolving dependencies
 		formatter.Section("Loading Packages")
-		
+
 		pm := grit.NewPackageManager(cwd)
 		packages, err := pm.LoadPackages()
 		if err != nil {
@@ -49,50 +49,77 @@ var buildCmd = &cobra.Command{
 		// Define cacheDir here, before it's used in the dirty flag check
 		cacheDir := filepath.Join(cwd, ".grit", "cache")
 		if !noCache {
-		    os.MkdirAll(cacheDir, 0755)
+			os.MkdirAll(cacheDir, 0755)
 		}
-		
+
 		// Add this block to filter packages if --dirty flag is set
+		// In the dirtyFlag check section, after loading packages
+
 		if dirtyFlag {
-		    formatter.Info("Filtering packages with no changes")
-		    var dirtyPackages []grit.Config
-		    
-		    for _, cfg := range packages {
-		        if cfg.Package.Name == "" {
-		            continue // Skip root config
-		        }
-		        
-		        cfgDir := filepath.Dir(cfg.Package.Path)
-		        newHash, err := calculatePackageHash(cfgDir)
-		        if err != nil {
-		            formatter.Warning(fmt.Sprintf("Could not calculate hash for %s: %v", cfg.Package.Name, err))
-		            dirtyPackages = append(dirtyPackages, cfg) // Include if we can't determine
-		            continue
-		        }
-		        
-		        cacheFile := filepath.Join(cacheDir, cfg.Package.Name+".hash")
-		        isDirty := false
-		        
-		        if cachedHash, err := os.ReadFile(cacheFile); err != nil {
-		            isDirty = true
-		        } else if string(cachedHash) != newHash {
-		            isDirty = true
-		        }
-		        
-		        if isDirty {
-		            dirtyPackages = append(dirtyPackages, cfg)
-		        }
-		    }
-		    
-		    formatter.Success(fmt.Sprintf("Found %d packages with changes", len(dirtyPackages)))
-		    packages = dirtyPackages
-		    
-		    if len(packages) == 0 {
-		        formatter.Success("No packages to build")
-		        return
-		    }
+			formatter.Info("Filtering packages with no changes")
+			var dirtyPackages []grit.Config
+
+			// First, build a reverse dependency map
+			reverseDeps := make(map[string][]string)
+			for _, cfg := range packages {
+				for _, depName := range cfg.Package.Dependencies {
+					reverseDeps[depName] = append(reverseDeps[depName], cfg.Package.Name)
+				}
+			}
+
+			// Track directly dirty packages first
+			directlyDirty := make(map[string]bool)
+
+			for _, cfg := range packages {
+				if cfg.Package.Name == "" {
+					continue // Skip root config
+				}
+
+				cfgDir := filepath.Dir(cfg.Package.Path)
+				newHash, err := calculatePackageHash(cfgDir)
+				if err != nil {
+					formatter.Warning(fmt.Sprintf("Could not calculate hash for %s: %v", cfg.Package.Name, err))
+					directlyDirty[cfg.Package.Name] = true
+					continue
+				}
+
+				cacheFile := filepath.Join(cacheDir, cfg.Package.Name+".hash")
+
+				if cachedHash, err := os.ReadFile(cacheFile); err != nil {
+					directlyDirty[cfg.Package.Name] = true
+				} else if string(cachedHash) != newHash {
+					directlyDirty[cfg.Package.Name] = true
+				}
+			}
+
+			// Now propagate dirtiness to dependent packages
+			allDirty := make(map[string]bool)
+			for pkgName := range directlyDirty {
+				allDirty[pkgName] = true
+				propagateDirtiness(pkgName, reverseDeps, allDirty, formatter)
+			}
+
+			// Build the final list of dirty packages
+			for _, cfg := range packages {
+				if allDirty[cfg.Package.Name] {
+					dirtyPackages = append(dirtyPackages, cfg)
+				}
+			}
+
+			formatter.Success(fmt.Sprintf("Found %d packages with changes", len(dirtyPackages)))
+			if len(directlyDirty) < len(allDirty) {
+				formatter.Detail(fmt.Sprintf("%d packages are directly changed, %d are affected by dependencies",
+					len(directlyDirty), len(allDirty)-len(directlyDirty)))
+			}
+
+			packages = dirtyPackages
+
+			if len(packages) == 0 {
+				formatter.Success("No packages to build")
+				return
+			}
 		}
-		
+
 		formatter.Section("Resolving Dependencies")
 		buildOrder, err := resolveDependencies(packages, formatter)
 		if err != nil {
@@ -106,21 +133,21 @@ var buildCmd = &cobra.Command{
 		formatter.Detail(fmt.Sprintf("Build order: %v", getPackageNames(buildOrder)))
 		successCount := 0
 		for i, cfg := range buildOrder {
-		    if cfg.Package.Name == "" {
-		        formatter.Detail("Skipping unnamed package")
-		        continue // Skip root config
-		    }
-		    
-		    // In the buildCmd.Run function, update the executeBuild call to pass cwd
-		    formatter.Info(fmt.Sprintf("Building package %d/%d: %s", i+1, len(buildOrder), cfg.Package.Name))
-		    err := executeBuild(cfg, cacheDir, noCache, formatter, cwd)
-		    if err != nil {
-		        formatter.Error(fmt.Sprintf("Error building %s: %v", cfg.Package.Name, err))
-		        os.Exit(1)
-		    }
-		    successCount++
+			if cfg.Package.Name == "" {
+				formatter.Detail("Skipping unnamed package")
+				continue // Skip root config
+			}
+
+			// In the buildCmd.Run function, update the executeBuild call to pass cwd
+			formatter.Info(fmt.Sprintf("Building package %d/%d: %s", i+1, len(buildOrder), cfg.Package.Name))
+			err := executeBuild(cfg, cacheDir, noCache, formatter, cwd)
+			if err != nil {
+				formatter.Error(fmt.Sprintf("Error building %s: %v", cfg.Package.Name, err))
+				os.Exit(1)
+			}
+			successCount++
 		}
-		
+
 		formatter.Section("Build Summary")
 		formatter.Success(fmt.Sprintf("Successfully built %d packages", successCount))
 	},
@@ -128,7 +155,7 @@ var buildCmd = &cobra.Command{
 
 func init() {
 	buildCmd.Flags().BoolVar(&noCache, "no-cache", false, "Bypass build cache")
-	buildCmd.Flags().BoolVar(&dirtyFlag, "dirty", false, "Only build packages with changes")  // Add this flag
+	buildCmd.Flags().BoolVar(&dirtyFlag, "dirty", false, "Only build packages with changes") // Add this flag
 	rootCmd.AddCommand(buildCmd)
 }
 
@@ -203,43 +230,49 @@ func resolveDependencies(packages []grit.Config, formatter *output.Formatter) ([
 		}
 	}
 
-	return order, nil
+	// Reverse the order to get bottom-up (dependencies first)
+	reversed := make([]grit.Config, len(order))
+	for i, cfg := range order {
+		reversed[len(order)-1-i] = cfg
+	}
+
+	return reversed, nil
 }
 
 func executeBuild(cfg grit.Config, cacheDir string, noCache bool, formatter *output.Formatter, cwd string) error {
-    // Skip if this is the root config file
-    if cfg.Package.Name == "" {
-        return nil
-    }
+	// Skip if this is the root config file
+	if cfg.Package.Name == "" {
+		return nil
+	}
 
-    // Get the package directory from the stored path
-    cfgDir := filepath.Dir(cfg.Package.Path)
-    
-    // Calculate a hash based on the package files
-    // If we're using --dirty, we might have already calculated this hash
-    var newHash string
-    if dirtyFlag && !noCache {
-        // Try to get the hash from the dirty check
-        cacheFile := filepath.Join(cacheDir, cfg.Package.Name+".hash")
-        if cachedHash, err := os.ReadFile(cacheFile); err == nil {
-            // We have a cached hash, but we know it's dirty, so use it
-            newHash = string(cachedHash)
-        } else {
-            // Calculate the hash
-            var err error
-            newHash, err = calculatePackageHash(cfgDir)
-            if err != nil {
-                return fmt.Errorf("failed to calculate package hash: %w", err)
-            }
-        }
-    } else {
-        // Calculate the hash normally
-        var err error
-        newHash, err = calculatePackageHash(cfgDir)
-        if err != nil {
-            return fmt.Errorf("failed to calculate package hash: %w", err)
-        }
-    }
+	// Get the package directory from the stored path
+	cfgDir := filepath.Dir(cfg.Package.Path)
+
+	// Calculate a hash based on the package files
+	// If we're using --dirty, we might have already calculated this hash
+	var newHash string
+	if dirtyFlag && !noCache {
+		// Try to get the hash from the dirty check
+		cacheFile := filepath.Join(cacheDir, cfg.Package.Name+".hash")
+		if cachedHash, err := os.ReadFile(cacheFile); err == nil {
+			// We have a cached hash, but we know it's dirty, so use it
+			newHash = string(cachedHash)
+		} else {
+			// Calculate the hash
+			var err error
+			newHash, err = calculatePackageHash(cfgDir)
+			if err != nil {
+				return fmt.Errorf("failed to calculate package hash: %w", err)
+			}
+		}
+	} else {
+		// Calculate the hash normally
+		var err error
+		newHash, err = calculatePackageHash(cfgDir)
+		if err != nil {
+			return fmt.Errorf("failed to calculate package hash: %w", err)
+		}
+	}
 
 	cacheFile := filepath.Join(cacheDir, cfg.Package.Name+".hash")
 
@@ -262,7 +295,7 @@ func executeBuild(cfg grit.Config, cacheDir string, noCache bool, formatter *out
 	formatter.Detail(fmt.Sprintf("Looking for root config at: %s", rootConfigPath))
 	rootConfigData, err := os.ReadFile(rootConfigPath)
 	if err != nil {
-	    return fmt.Errorf("failed to read root config: %w", err)
+		return fmt.Errorf("failed to read root config: %w", err)
 	}
 
 	var rootConfig grit.RootConfig
@@ -307,21 +340,21 @@ func executeBuild(cfg grit.Config, cacheDir string, noCache bool, formatter *out
 
 	// In the executeBuild function, add timeout and better error handling for the command execution
 	formatter.Detail(fmt.Sprintf("Executing build command: %s", buildCmd))
-	
+
 	// Execute the build command with a timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	
+
 	cmd := exec.CommandContext(ctx, "sh", "-c", buildCmd)
 	cmd.Dir = cfgDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	
+
 	if err := cmd.Run(); err != nil {
-	    if ctx.Err() == context.DeadlineExceeded {
-	        return fmt.Errorf("build command timed out after 2 minutes")
-	    }
-	    return fmt.Errorf("build command failed: %w", err)
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("build command timed out after 2 minutes")
+		}
+		return fmt.Errorf("build command failed: %w", err)
 	}
 
 	formatter.Success(fmt.Sprintf("Built %s successfully", cfg.Package.Name))
@@ -384,11 +417,23 @@ func calculatePackageHash(pkgDir string) (string, error) {
 
 // Helper function to get package names for logging
 func getPackageNames(configs []grit.Config) []string {
-    names := make([]string, 0, len(configs))
-    for _, cfg := range configs {
-        if cfg.Package.Name != "" {
-            names = append(names, cfg.Package.Name)
-        }
-    }
-    return names
+	names := make([]string, 0, len(configs))
+	for _, cfg := range configs {
+		if cfg.Package.Name != "" {
+			names = append(names, cfg.Package.Name)
+		}
+	}
+	return names
+}
+
+// Helper function to recursively propagate dirtiness to dependent packages
+func propagateDirtiness(pkgName string, reverseDeps map[string][]string, allDirty map[string]bool, formatter *output.Formatter) {
+	for _, depender := range reverseDeps[pkgName] {
+		if !allDirty[depender] {
+			formatter.Detail(fmt.Sprintf("Package %s is dirty because it depends on %s", depender, pkgName))
+			allDirty[depender] = true
+			// Recursively mark packages that depend on this one
+			propagateDirtiness(depender, reverseDeps, allDirty, formatter)
+		}
+	}
 }
