@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/weslien/grit/pkg/grit"
@@ -99,20 +101,24 @@ var buildCmd = &cobra.Command{
 		}
 		formatter.Success("Dependencies resolved successfully")
 
+		// In the buildCmd.Run function, add more detailed logging
 		formatter.Section("Building Packages")
+		formatter.Detail(fmt.Sprintf("Build order: %v", getPackageNames(buildOrder)))
 		successCount := 0
-		for _, cfg := range buildOrder {
-			if cfg.Package.Name == "" {
-				continue // Skip root config
-			}
-			
-			formatter.Info(fmt.Sprintf("Building package: %s", cfg.Package.Name))
-			err := executeBuild(cfg, cacheDir, noCache, formatter)
-			if err != nil {
-				formatter.Error(fmt.Sprintf("Error building %s: %v", cfg.Package.Name, err))
-				os.Exit(1)
-			}
-			successCount++
+		for i, cfg := range buildOrder {
+		    if cfg.Package.Name == "" {
+		        formatter.Detail("Skipping unnamed package")
+		        continue // Skip root config
+		    }
+		    
+		    // In the buildCmd.Run function, update the executeBuild call to pass cwd
+		    formatter.Info(fmt.Sprintf("Building package %d/%d: %s", i+1, len(buildOrder), cfg.Package.Name))
+		    err := executeBuild(cfg, cacheDir, noCache, formatter, cwd)
+		    if err != nil {
+		        formatter.Error(fmt.Sprintf("Error building %s: %v", cfg.Package.Name, err))
+		        os.Exit(1)
+		    }
+		    successCount++
 		}
 		
 		formatter.Section("Build Summary")
@@ -200,7 +206,7 @@ func resolveDependencies(packages []grit.Config, formatter *output.Formatter) ([
 	return order, nil
 }
 
-func executeBuild(cfg grit.Config, cacheDir string, noCache bool, formatter *output.Formatter) error {
+func executeBuild(cfg grit.Config, cacheDir string, noCache bool, formatter *output.Formatter, cwd string) error {
     // Skip if this is the root config file
     if cfg.Package.Name == "" {
         return nil
@@ -250,11 +256,13 @@ func executeBuild(cfg grit.Config, cacheDir string, noCache bool, formatter *out
 	// Remove this duplicate line
 	// formatter.Info(fmt.Sprintf("Building package: %s", cfg.Package.Name))
 
+	// In the executeBuild function, fix the root config path
 	// Load the root config to get type information
-	rootConfigPath := filepath.Join(filepath.Dir(cfgDir), "..", "..", "grit.yaml")
+	rootConfigPath := filepath.Join(cwd, "grit.yaml")
+	formatter.Detail(fmt.Sprintf("Looking for root config at: %s", rootConfigPath))
 	rootConfigData, err := os.ReadFile(rootConfigPath)
 	if err != nil {
-		return fmt.Errorf("failed to read root config: %w", err)
+	    return fmt.Errorf("failed to read root config: %w", err)
 	}
 
 	var rootConfig grit.RootConfig
@@ -297,16 +305,23 @@ func executeBuild(cfg grit.Config, cacheDir string, noCache bool, formatter *out
 		}
 	}
 
+	// In the executeBuild function, add timeout and better error handling for the command execution
 	formatter.Detail(fmt.Sprintf("Executing build command: %s", buildCmd))
-
-	// Execute the build command
-	cmd := exec.Command("sh", "-c", buildCmd)
+	
+	// Execute the build command with a timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	
+	cmd := exec.CommandContext(ctx, "sh", "-c", buildCmd)
 	cmd.Dir = cfgDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-
+	
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("build command failed: %w", err)
+	    if ctx.Err() == context.DeadlineExceeded {
+	        return fmt.Errorf("build command timed out after 2 minutes")
+	    }
+	    return fmt.Errorf("build command failed: %w", err)
 	}
 
 	formatter.Success(fmt.Sprintf("Built %s successfully", cfg.Package.Name))
@@ -365,4 +380,15 @@ func calculatePackageHash(pkgDir string) (string, error) {
 	hasher.Write([]byte(allInfos))
 
 	return fmt.Sprintf("%x", hasher.Sum(nil)), nil
+}
+
+// Helper function to get package names for logging
+func getPackageNames(configs []grit.Config) []string {
+    names := make([]string, 0, len(configs))
+    for _, cfg := range configs {
+        if cfg.Package.Name != "" {
+            names = append(names, cfg.Package.Name)
+        }
+    }
+    return names
 }
