@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -131,23 +132,58 @@ var buildCmd = &cobra.Command{
 		// In the buildCmd.Run function, add more detailed logging
 		formatter.Section("Building Packages")
 		formatter.Detail(fmt.Sprintf("Build order: %v", getPackageNames(buildOrder)))
+
+		// Group packages by their dependency level
+		buildLevels := groupPackagesByLevel(buildOrder, formatter)
+		formatter.Detail(fmt.Sprintf("Build will execute in %d parallel stages", len(buildLevels)))
+
 		successCount := 0
-		for i, cfg := range buildOrder {
-			if cfg.Package.Name == "" {
-				formatter.Detail("Skipping unnamed package")
-				continue // Skip root config
-			}
-
-			// In the buildCmd.Run function, update the executeBuild call to pass cwd
-			formatter.Info(fmt.Sprintf("Building package %d/%d: %s", i+1, len(buildOrder), cfg.Package.Name))
-			err := executeBuild(cfg, cacheDir, noCache, formatter, cwd)
-			if err != nil {
-				formatter.Error(fmt.Sprintf("Error building %s: %v", cfg.Package.Name, err))
-				os.Exit(1)
-			}
-			successCount++
+		for level, levelPackages := range buildLevels {
+		    formatter.Info(fmt.Sprintf("Building stage %d/%d with %d packages", level+1, len(buildLevels), len(levelPackages)))
+		    
+		    // Create a wait group for this level
+		    var wg sync.WaitGroup
+		    errChan := make(chan error, len(levelPackages))
+		    resultChan := make(chan string, len(levelPackages))
+		    
+		    // Launch goroutines for each package at this level
+		    for _, cfg := range levelPackages {
+		        if cfg.Package.Name == "" {
+		            formatter.Detail("Skipping unnamed package")
+		            continue // Skip root config
+		        }
+		        
+		        wg.Add(1)
+		        go func(cfg grit.Config) {
+		            defer wg.Done()
+		            err := executeBuild(cfg, cacheDir, noCache, formatter, cwd)
+		            if err != nil {
+		                errChan <- fmt.Errorf("error building %s: %w", cfg.Package.Name, err)
+		            } else {
+		                resultChan <- cfg.Package.Name
+		            }
+		        }(cfg)
+		    }
+		    
+		    // Wait for all builds at this level to complete
+		    wg.Wait()
+		    close(errChan)
+		    close(resultChan)
+		    
+		    // Check for errors
+		    if len(errChan) > 0 {
+		        for err := range errChan {
+		            formatter.Error(err.Error())
+		        }
+		        os.Exit(1)
+		    }
+		    
+		    // Count successes
+		    for range resultChan {
+		        successCount++
+		    }
 		}
-
+		
 		formatter.Section("Build Summary")
 		formatter.Success(fmt.Sprintf("Successfully built %d packages", successCount))
 	},
@@ -436,4 +472,87 @@ func propagateDirtiness(pkgName string, reverseDeps map[string][]string, allDirt
 			propagateDirtiness(depender, reverseDeps, allDirty, formatter)
 		}
 	}
+}
+
+// Helper function to group packages by their dependency level for parallel building
+func groupPackagesByLevel(buildOrder []grit.Config, formatter *output.Formatter) [][]grit.Config {
+    // Create a map of package name to its dependencies
+    dependsOn := make(map[string]map[string]bool)
+    for _, cfg := range buildOrder {
+        if cfg.Package.Name == "" {
+            continue
+        }
+        
+        dependsOn[cfg.Package.Name] = make(map[string]bool)
+        for _, dep := range cfg.Package.Dependencies {
+            dependsOn[cfg.Package.Name][dep] = true
+        }
+    }
+    
+    // Create a map of package name to its dependents
+    dependedOnBy := make(map[string]map[string]bool)
+    for pkgName, deps := range dependsOn {
+        for dep := range deps {
+            if dependedOnBy[dep] == nil {
+                dependedOnBy[dep] = make(map[string]bool)
+            }
+            dependedOnBy[dep][pkgName] = true
+        }
+    }
+    
+    // Group packages by levels
+    var levels [][]grit.Config
+    remaining := make(map[string]grit.Config)
+    
+    // Initialize remaining packages
+    for _, cfg := range buildOrder {
+        if cfg.Package.Name != "" {
+            remaining[cfg.Package.Name] = cfg
+        }
+    }
+    
+    // Continue until all packages are assigned to levels
+    for len(remaining) > 0 {
+        var currentLevel []grit.Config
+        
+        // Find packages with no remaining dependencies
+        for pkgName, cfg := range remaining {
+            canBuild := true
+            for dep := range dependsOn[pkgName] {
+                if _, exists := remaining[dep]; exists {
+                    canBuild = false
+                    break
+                }
+            }
+            
+            if canBuild {
+                currentLevel = append(currentLevel, cfg)
+            }
+        }
+        
+        // In the groupPackagesByLevel function, there's an unused variable in the cycle detection section
+        if len(currentLevel) == 0 && len(remaining) > 0 {
+        formatter.Warning("Possible dependency cycle detected. Breaking cycle to continue build.")
+        for _, cfg := range remaining {
+        currentLevel = append(currentLevel, cfg)
+        break
+        }
+        }
+        
+        // Sort the current level by dependency count (packages with more dependents first)
+        sort.Slice(currentLevel, func(i, j int) bool {
+            nameI := currentLevel[i].Package.Name
+            nameJ := currentLevel[j].Package.Name
+            return len(dependedOnBy[nameI]) > len(dependedOnBy[nameJ])
+        })
+        
+        // Remove the packages from remaining
+        for _, cfg := range currentLevel {
+            delete(remaining, cfg.Package.Name)
+        }
+        
+        levels = append(levels, currentLevel)
+    }
+    
+    return levels
 }
