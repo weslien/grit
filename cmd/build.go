@@ -16,6 +16,7 @@ import (
 )
 
 var noCache bool
+var dirtyFlag bool  // Add this variable declaration
 
 var buildCmd = &cobra.Command{
 	Use:   "build [type] [name]",
@@ -32,6 +33,7 @@ var buildCmd = &cobra.Command{
 		}
 
 		formatter.Header("GRIT Build")
+		// In the buildCmd.Run function, after loading packages but before resolving dependencies
 		formatter.Section("Loading Packages")
 		
 		pm := grit.NewPackageManager(cwd)
@@ -42,6 +44,53 @@ var buildCmd = &cobra.Command{
 		}
 		formatter.Success(fmt.Sprintf("Loaded %d packages", len(packages)))
 
+		// Define cacheDir here, before it's used in the dirty flag check
+		cacheDir := filepath.Join(cwd, ".grit", "cache")
+		if !noCache {
+		    os.MkdirAll(cacheDir, 0755)
+		}
+		
+		// Add this block to filter packages if --dirty flag is set
+		if dirtyFlag {
+		    formatter.Info("Filtering packages with no changes")
+		    var dirtyPackages []grit.Config
+		    
+		    for _, cfg := range packages {
+		        if cfg.Package.Name == "" {
+		            continue // Skip root config
+		        }
+		        
+		        cfgDir := filepath.Dir(cfg.Package.Path)
+		        newHash, err := calculatePackageHash(cfgDir)
+		        if err != nil {
+		            formatter.Warning(fmt.Sprintf("Could not calculate hash for %s: %v", cfg.Package.Name, err))
+		            dirtyPackages = append(dirtyPackages, cfg) // Include if we can't determine
+		            continue
+		        }
+		        
+		        cacheFile := filepath.Join(cacheDir, cfg.Package.Name+".hash")
+		        isDirty := false
+		        
+		        if cachedHash, err := os.ReadFile(cacheFile); err != nil {
+		            isDirty = true
+		        } else if string(cachedHash) != newHash {
+		            isDirty = true
+		        }
+		        
+		        if isDirty {
+		            dirtyPackages = append(dirtyPackages, cfg)
+		        }
+		    }
+		    
+		    formatter.Success(fmt.Sprintf("Found %d packages with changes", len(dirtyPackages)))
+		    packages = dirtyPackages
+		    
+		    if len(packages) == 0 {
+		        formatter.Success("No packages to build")
+		        return
+		    }
+		}
+		
 		formatter.Section("Resolving Dependencies")
 		buildOrder, err := resolveDependencies(packages, formatter)
 		if err != nil {
@@ -49,11 +98,6 @@ var buildCmd = &cobra.Command{
 			os.Exit(1)
 		}
 		formatter.Success("Dependencies resolved successfully")
-
-		cacheDir := filepath.Join(cwd, ".grit", "cache")
-		if !noCache {
-			os.MkdirAll(cacheDir, 0755)
-		}
 
 		formatter.Section("Building Packages")
 		successCount := 0
@@ -78,6 +122,7 @@ var buildCmd = &cobra.Command{
 
 func init() {
 	buildCmd.Flags().BoolVar(&noCache, "no-cache", false, "Bypass build cache")
+	buildCmd.Flags().BoolVar(&dirtyFlag, "dirty", false, "Only build packages with changes")  // Add this flag
 	rootCmd.AddCommand(buildCmd)
 }
 
@@ -156,19 +201,39 @@ func resolveDependencies(packages []grit.Config, formatter *output.Formatter) ([
 }
 
 func executeBuild(cfg grit.Config, cacheDir string, noCache bool, formatter *output.Formatter) error {
-	// Skip if this is the root config file
-	if cfg.Package.Name == "" {
-		return nil
-	}
+    // Skip if this is the root config file
+    if cfg.Package.Name == "" {
+        return nil
+    }
 
-	// Get the package directory from the stored path
-	cfgDir := filepath.Dir(cfg.Package.Path)
-	
-	// Calculate a hash based on the package files
-	newHash, err := calculatePackageHash(cfgDir)
-	if err != nil {
-		return fmt.Errorf("failed to calculate package hash: %w", err)
-	}
+    // Get the package directory from the stored path
+    cfgDir := filepath.Dir(cfg.Package.Path)
+    
+    // Calculate a hash based on the package files
+    // If we're using --dirty, we might have already calculated this hash
+    var newHash string
+    if dirtyFlag && !noCache {
+        // Try to get the hash from the dirty check
+        cacheFile := filepath.Join(cacheDir, cfg.Package.Name+".hash")
+        if cachedHash, err := os.ReadFile(cacheFile); err == nil {
+            // We have a cached hash, but we know it's dirty, so use it
+            newHash = string(cachedHash)
+        } else {
+            // Calculate the hash
+            var err error
+            newHash, err = calculatePackageHash(cfgDir)
+            if err != nil {
+                return fmt.Errorf("failed to calculate package hash: %w", err)
+            }
+        }
+    } else {
+        // Calculate the hash normally
+        var err error
+        newHash, err = calculatePackageHash(cfgDir)
+        if err != nil {
+            return fmt.Errorf("failed to calculate package hash: %w", err)
+        }
+    }
 
 	cacheFile := filepath.Join(cacheDir, cfg.Package.Name+".hash")
 
