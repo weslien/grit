@@ -149,29 +149,83 @@ func commitPackageChanges(pkg grit.Config, cwd string, formatter *output.Formatt
 	
 	formatter.Section(fmt.Sprintf("Package: %s", pkg.Package.Name))
 	
-	// Show changes
+	// Show summary of changes first
 	cmd := exec.Command("git", "status", "-s", pkgPath)
-	output, err := cmd.Output()
+	statusOutput, err := cmd.Output()
 	if err != nil {
-		formatter.Error(fmt.Sprintf("Failed to get status for %s: %v", pkg.Package.Name, err))
-		return
+		formatter.Warning(fmt.Sprintf("Failed to get status for %s: %v", pkg.Package.Name, err))
+	} else if len(statusOutput) > 0 {
+		formatter.Detail("Summary of changes:")
+		fmt.Println(string(statusOutput))
 	}
 	
-	formatter.Detail("Changes:")
-	formatter.Detail(string(output))
+	// Ask if user wants to see the complete diff
+	reader := bufio.NewReader(os.Stdin)
+	formatter.Info("View complete diff? (y/n):")
+	viewDiff, _ := reader.ReadString('\n')
+	viewDiff = strings.TrimSpace(viewDiff)
 	
-	// Show diff
-	cmd = exec.Command("git", "diff", "--stat", pkgPath)
-	output, err = cmd.Output()
-	if err != nil {
-		formatter.Warning(fmt.Sprintf("Failed to get diff for %s: %v", pkg.Package.Name, err))
-	} else {
-		formatter.Detail("Diff summary:")
-		formatter.Detail(string(output))
+	if strings.ToLower(viewDiff) == "y" || strings.ToLower(viewDiff) == "yes" {
+		// First, temporarily add all files in the package to the index
+		// This allows us to see the diff for new files too
+		tempAddCmd := exec.Command("git", "add", "-N", pkgPath)
+		tempAddCmd.Run() // Ignore errors, we'll still try to show what we can
+		
+		// Show diff for all files (including new ones)
+		diffCmd := exec.Command("git", "diff", pkgPath)
+		diffCmd.Stdout = os.Stdout
+		diffCmd.Stderr = os.Stderr
+		diffCmd.Stdin = os.Stdin
+		
+		formatter.Detail("Changes:")
+		err := diffCmd.Run()
+		if err != nil {
+			formatter.Warning(fmt.Sprintf("Failed to display diff for %s: %v", pkg.Package.Name, err))
+		}
+		
+		// Also show staged changes if any
+		stagedCmd := exec.Command("git", "diff", "--cached", pkgPath)
+		stagedCmd.Stdout = os.Stdout
+		stagedCmd.Stderr = os.Stderr
+		stagedCmd.Stdin = os.Stdin
+		
+		formatter.Detail("Staged changes:")
+		err = stagedCmd.Run()
+		if err != nil {
+			formatter.Warning(fmt.Sprintf("Failed to display staged changes for %s: %v", pkg.Package.Name, err))
+		}
+		
+		// Show untracked files
+		untrackedCmd := exec.Command("git", "ls-files", "--others", "--exclude-standard", pkgPath)
+		untrackedOutput, err := untrackedCmd.Output()
+		if err != nil {
+			formatter.Warning(fmt.Sprintf("Failed to get untracked files for %s: %v", pkg.Package.Name, err))
+		} else if len(untrackedOutput) > 0 {
+			formatter.Detail("Untracked files:")
+			fmt.Println(string(untrackedOutput))
+			
+			// For each untracked file, show its content
+			files := strings.Split(strings.TrimSpace(string(untrackedOutput)), "\n")
+			for _, file := range files {
+				if file == "" {
+					continue
+				}
+				
+				formatter.Detail(fmt.Sprintf("Content of new file: %s", file))
+				catCmd := exec.Command("cat", file)
+				catCmd.Stdout = os.Stdout
+				catCmd.Stderr = os.Stderr
+				catCmd.Run() // Ignore errors
+				fmt.Println() // Add a newline after file content
+			}
+		}
+		
+		// Reset any temporary adds we did
+		resetCmd := exec.Command("git", "reset", pkgPath)
+		resetCmd.Run() // Ignore errors
 	}
 	
 	// Ask for commit message
-	reader := bufio.NewReader(os.Stdin)
 	formatter.Info(fmt.Sprintf("Enter commit message for %s (or 'skip' to skip):", pkg.Package.Name))
 	message, _ := reader.ReadString('\n')
 	message = strings.TrimSpace(message)
@@ -204,29 +258,83 @@ func commitPackageChanges(pkg grit.Config, cwd string, formatter *output.Formatt
 func commitRepoChanges(cwd string, formatter *output.Formatter) {
 	formatter.Section("Repository Changes")
 	
-	// Show changes outside of packages
+	// Show summary of changes first
 	cmd := exec.Command("git", "status", "-s")
-	output, err := cmd.Output()
+	statusOutput, err := cmd.Output()
 	if err != nil {
-		formatter.Error(fmt.Sprintf("Failed to get repo status: %v", err))
-		return
+		formatter.Warning(fmt.Sprintf("Failed to get repo status: %v", err))
+	} else if len(statusOutput) > 0 {
+		formatter.Detail("Summary of changes:")
+		fmt.Println(string(statusOutput))
 	}
 	
-	formatter.Detail("Changes:")
-	formatter.Detail(string(output))
+	// Ask if user wants to see the complete diff
+	reader := bufio.NewReader(os.Stdin)
+	formatter.Info("View complete diff? (y/n):")
+	viewDiff, _ := reader.ReadString('\n')
+	viewDiff = strings.TrimSpace(viewDiff)
 	
-	// Show diff
-	cmd = exec.Command("git", "diff", "--stat")
-	output, err = cmd.Output()
-	if err != nil {
-		formatter.Warning(fmt.Sprintf("Failed to get repo diff: %v", err))
-	} else {
-		formatter.Detail("Diff summary:")
-		formatter.Detail(string(output))
+	if strings.ToLower(viewDiff) == "y" || strings.ToLower(viewDiff) == "yes" {
+		// First, temporarily add all files to the index
+		// This allows us to see the diff for new files too
+		tempAddCmd := exec.Command("git", "add", "-N", ".")
+		tempAddCmd.Run() // Ignore errors, we'll still try to show what we can
+		
+		// Show diff for all files (including new ones)
+		diffCmd := exec.Command("git", "diff")
+		diffCmd.Stdout = os.Stdout
+		diffCmd.Stderr = os.Stderr
+		diffCmd.Stdin = os.Stdin
+		
+		formatter.Detail("Changes:")
+		err := diffCmd.Run()
+		if err != nil {
+			formatter.Warning(fmt.Sprintf("Failed to display repo diff: %v", err))
+		}
+		
+		// Also show staged changes if any
+		stagedCmd := exec.Command("git", "diff", "--cached")
+		stagedCmd.Stdout = os.Stdout
+		stagedCmd.Stderr = os.Stderr
+		stagedCmd.Stdin = os.Stdin
+		
+		formatter.Detail("Staged changes:")
+		err = stagedCmd.Run()
+		if err != nil {
+			formatter.Warning(fmt.Sprintf("Failed to display staged repo changes: %v", err))
+		}
+		
+		// Show untracked files
+		untrackedCmd := exec.Command("git", "ls-files", "--others", "--exclude-standard")
+		untrackedOutput, err := untrackedCmd.Output()
+		if err != nil {
+			formatter.Warning(fmt.Sprintf("Failed to get untracked repo files: %v", err))
+		} else if len(untrackedOutput) > 0 {
+			formatter.Detail("Untracked files:")
+			fmt.Println(string(untrackedOutput))
+			
+			// For each untracked file, show its content
+			files := strings.Split(strings.TrimSpace(string(untrackedOutput)), "\n")
+			for _, file := range files {
+				if file == "" {
+					continue
+				}
+				
+				formatter.Detail(fmt.Sprintf("Content of new file: %s", file))
+				catCmd := exec.Command("cat", file)
+				catCmd.Stdout = os.Stdout
+				catCmd.Stderr = os.Stderr
+				catCmd.Run() // Ignore errors
+				fmt.Println() // Add a newline after file content
+			}
+		}
+		
+		// Reset any temporary adds we did
+		resetCmd := exec.Command("git", "reset")
+		resetCmd.Run() // Ignore errors
 	}
 	
 	// Ask for commit message
-	reader := bufio.NewReader(os.Stdin)
 	formatter.Info("Enter commit message for repository changes (or 'skip' to skip):")
 	message, _ := reader.ReadString('\n')
 	message = strings.TrimSpace(message)
