@@ -11,14 +11,9 @@ import (
 type Package struct {
 	Name         string
 	Version      string
-	Dependencies []Dependency
+	Dependencies []string
 	Hash         string
 	Path         string // Add this field to store the path to grit.yaml
-}
-
-type Dependency struct {
-	Name    string
-	Version string
 }
 
 type PackageManager struct {

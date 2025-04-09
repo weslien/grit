@@ -97,17 +97,17 @@ func resolveDependencies(packages []grit.Config, formatter *output.Formatter) ([
 
 	// Add dependencies to the graph
 	for _, cfg := range packages {
-		for _, dep := range cfg.Package.Dependencies {
+		for _, depName := range cfg.Package.Dependencies {
 			// Check if the dependency exists
-			if _, exists := nodeMap[dep.Name]; !exists {
+			if _, exists := nodeMap[depName]; !exists {
 				// Skip missing dependencies or handle them differently
 				formatter.Warning(fmt.Sprintf("Package %s depends on %s, but it doesn't exist",
-					cfg.Package.Name, dep.Name))
+					cfg.Package.Name, depName))
 				continue
 			}
 
-			graph[cfg.Package.Name] = append(graph[cfg.Package.Name], dep.Name)
-			inDegree[dep.Name]++
+			graph[cfg.Package.Name] = append(graph[cfg.Package.Name], depName)
+			inDegree[depName]++
 		}
 	}
 
