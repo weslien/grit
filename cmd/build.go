@@ -1,14 +1,17 @@
 package cmd
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/weslien/grit/pkg/grit"
+	"github.com/weslien/grit/pkg/output"
 	"gopkg.in/yaml.v3"
 )
 
@@ -19,37 +22,57 @@ var buildCmd = &cobra.Command{
 	Short: "Build packages and their dependencies",
 	Long:  `Build packages respecting dependency order and utilizing build cache`,
 	Run: func(cmd *cobra.Command, args []string) {
+		// Rename the formatter variable to avoid conflict with fmt package
+		formatter := output.New()
+		
 		cwd, err := os.Getwd()
 		if err != nil {
-			fmt.Printf("Error getting current directory: %v\n", err)
+			formatter.Error(fmt.Sprintf("Error getting current directory: %v", err))
 			os.Exit(1)
 		}
 
+		formatter.Header("GRIT Build")
+		formatter.Section("Loading Packages")
+		
 		pm := grit.NewPackageManager(cwd)
 		packages, err := pm.LoadPackages()
 		if err != nil {
-			fmt.Printf("Error loading packages: %v\n", err)
+			formatter.Error(fmt.Sprintf("Error loading packages: %v", err))
 			os.Exit(1)
 		}
+		formatter.Success(fmt.Sprintf("Loaded %d packages", len(packages)))
 
-		buildOrder, err := resolveDependencies(packages)
+		formatter.Section("Resolving Dependencies")
+		buildOrder, err := resolveDependencies(packages, formatter)
 		if err != nil {
-			fmt.Printf("Error resolving dependencies: %v\n", err)
+			formatter.Error(fmt.Sprintf("Error resolving dependencies: %v", err))
 			os.Exit(1)
 		}
+		formatter.Success("Dependencies resolved successfully")
 
 		cacheDir := filepath.Join(cwd, ".grit", "cache")
 		if !noCache {
 			os.MkdirAll(cacheDir, 0755)
 		}
 
+		formatter.Section("Building Packages")
+		successCount := 0
 		for _, cfg := range buildOrder {
-			err := executeBuild(cfg, cacheDir, noCache)
+			if cfg.Package.Name == "" {
+				continue // Skip root config
+			}
+			
+			formatter.Info(fmt.Sprintf("Building package: %s", cfg.Package.Name))
+			err := executeBuild(cfg, cacheDir, noCache, formatter)
 			if err != nil {
-				fmt.Printf("Error building %s: %v\n", cfg.Package.Name, err)
+				formatter.Error(fmt.Sprintf("Error building %s: %v", cfg.Package.Name, err))
 				os.Exit(1)
 			}
+			successCount++
 		}
+		
+		formatter.Section("Build Summary")
+		formatter.Success(fmt.Sprintf("Successfully built %d packages", successCount))
 	},
 }
 
@@ -58,7 +81,7 @@ func init() {
 	rootCmd.AddCommand(buildCmd)
 }
 
-func resolveDependencies(packages []grit.Config) ([]grit.Config, error) {
+func resolveDependencies(packages []grit.Config, formatter *output.Formatter) ([]grit.Config, error) {
 	// Build dependency graph
 	graph := make(map[string][]string)
 	nodeMap := make(map[string]grit.Config)
@@ -66,7 +89,6 @@ func resolveDependencies(packages []grit.Config) ([]grit.Config, error) {
 
 	// Initialize the graph with all packages
 	for _, cfg := range packages {
-		//fmt.Printf("Initializing node: %s\n", cfg.Package.Name)
 		nodeMap[cfg.Package.Name] = cfg
 		if _, exists := graph[cfg.Package.Name]; !exists {
 			graph[cfg.Package.Name] = []string{}
@@ -79,8 +101,8 @@ func resolveDependencies(packages []grit.Config) ([]grit.Config, error) {
 			// Check if the dependency exists
 			if _, exists := nodeMap[dep.Name]; !exists {
 				// Skip missing dependencies or handle them differently
-				fmt.Printf("Warning: Package %s depends on %s, but it doesn't exist\n",
-					cfg.Package.Name, dep.Name)
+				formatter.Warning(fmt.Sprintf("Package %s depends on %s, but it doesn't exist",
+					cfg.Package.Name, dep.Name))
 				continue
 			}
 
@@ -112,9 +134,8 @@ func resolveDependencies(packages []grit.Config) ([]grit.Config, error) {
 	}
 
 	// If we couldn't resolve all packages, there might be a cycle
-	// But we'll return what we have instead of failing
 	if len(order) != len(packages) {
-		fmt.Println("Warning: Possible dependency cycle detected. Building packages in best-effort order.")
+		formatter.Warning("Possible dependency cycle detected. Building packages in best-effort order.")
 
 		// Add remaining packages in any order
 		for name, cfg := range nodeMap {
@@ -134,22 +155,35 @@ func resolveDependencies(packages []grit.Config) ([]grit.Config, error) {
 	return order, nil
 }
 
-func executeBuild(cfg grit.Config, cacheDir string, noCache bool) error {
+func executeBuild(cfg grit.Config, cacheDir string, noCache bool, formatter *output.Formatter) error {
+	// Skip if this is the root config file
+	if cfg.Package.Name == "" {
+		return nil
+	}
+
+	// Get the package directory from the stored path
+	cfgDir := filepath.Dir(cfg.Package.Path)
+	
+	// Calculate a hash based on the package files
+	newHash, err := calculatePackageHash(cfgDir)
+	if err != nil {
+		return fmt.Errorf("failed to calculate package hash: %w", err)
+	}
+
 	cacheFile := filepath.Join(cacheDir, cfg.Package.Name+".hash")
 
 	if !noCache {
 		if cachedHash, err := os.ReadFile(cacheFile); err == nil {
-			if string(cachedHash) == cfg.Package.Hash {
-				fmt.Printf("Using cached build for %s\n", cfg.Package.Name)
+			if string(cachedHash) == newHash {
+				formatter.Detail(fmt.Sprintf("Using cached build for %s", cfg.Package.Name))
 				return nil
 			}
+			formatter.Warning(fmt.Sprintf("Cache invalidated for %s (files changed)", cfg.Package.Name))
 		}
 	}
 
-	fmt.Printf("Building package: %s\n", cfg.Package.Name)
-
-	// Get the package directory from the stored path
-	cfgDir := filepath.Dir(cfg.Package.Path)
+	// Remove this duplicate line
+	// formatter.Info(fmt.Sprintf("Building package: %s", cfg.Package.Name))
 
 	// Load the root config to get type information
 	rootConfigPath := filepath.Join(filepath.Dir(cfgDir), "..", "..", "grit.yaml")
@@ -198,7 +232,7 @@ func executeBuild(cfg grit.Config, cacheDir string, noCache bool) error {
 		}
 	}
 
-	fmt.Printf("Executing build command for %s: %s\n", cfg.Package.Name, buildCmd)
+	formatter.Detail(fmt.Sprintf("Executing build command: %s", buildCmd))
 
 	// Execute the build command
 	cmd := exec.Command("sh", "-c", buildCmd)
@@ -210,10 +244,60 @@ func executeBuild(cfg grit.Config, cacheDir string, noCache bool) error {
 		return fmt.Errorf("build command failed: %w", err)
 	}
 
-	// TODO: Calculate real package hash from source files
+	formatter.Success(fmt.Sprintf("Built %s successfully", cfg.Package.Name))
+
+	// Save the new hash to the cache
 	if !noCache {
-		os.WriteFile(cacheFile, []byte(cfg.Package.Hash), 0644)
+		os.WriteFile(cacheFile, []byte(newHash), 0644)
 	}
 
 	return nil
+}
+
+// Add this new function to calculate a hash based on directory contents
+func calculatePackageHash(pkgDir string) (string, error) {
+	var fileInfos []string
+
+	// Walk through the package directory
+	err := filepath.Walk(pkgDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // Skip files we can't access
+		}
+
+		// Skip directories and hidden files/directories
+		if info.IsDir() {
+			if strings.HasPrefix(filepath.Base(path), ".") && path != pkgDir {
+				return filepath.SkipDir // Skip hidden directories
+			}
+			return nil
+		}
+
+		// Skip hidden files
+		if strings.HasPrefix(filepath.Base(path), ".") {
+			return nil
+		}
+
+		// Add file info to our list (path, size, mod time)
+		relPath, _ := filepath.Rel(pkgDir, path)
+		fileInfo := fmt.Sprintf("%s:%d:%d",
+			relPath,
+			info.Size(),
+			info.ModTime().UnixNano())
+		fileInfos = append(fileInfos, fileInfo)
+		return nil
+	})
+
+	if err != nil {
+		return "", err
+	}
+
+	// Sort the file infos for consistent hashing
+	sort.Strings(fileInfos)
+
+	// Join all file infos and hash them
+	allInfos := strings.Join(fileInfos, "|")
+	hasher := sha256.New()
+	hasher.Write([]byte(allInfos))
+
+	return fmt.Sprintf("%x", hasher.Sum(nil)), nil
 }

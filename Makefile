@@ -8,7 +8,9 @@ build:
 	go build -o bin/grit
 
 install:
-	go install
+	@echo "Installing grit..."
+	@go install
+	@echo "✅"
 
 uninstall:
 	rm -f $$(shell go env GOPATH)/bin/grit
