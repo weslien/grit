@@ -40,7 +40,7 @@ All pull requests must pass the following automated checks before being merged:
 **Required Status**: ✅ **MUST PASS**
 
 #### **2. Tests (`test`)**
-- **Unit tests** across Go versions 1.22 and 1.23
+- **Unit tests** across Go versions 1.23 and 1.24
 - **Race condition detection** (`-race` flag)
 - **Code coverage** minimum 60% required
 - **Coverage upload** to Codecov
@@ -232,7 +232,7 @@ The following branches are protected and require:
 - ✅ **Require review from code owners**
 - ✅ **All CI checks must pass**:
   - `lint` - Linting and formatting
-  - `test` - Unit tests (Go 1.22, 1.23)
+  - `test` - Unit tests (Go 1.23, 1.24)
   - `build` - Cross-platform builds
   - `security` - Security scanning
   - `integration` - Integration tests

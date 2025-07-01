@@ -6,7 +6,7 @@ on:
       - 'v*'
 
 env:
-  GO_VERSION: '1.23'
+  GO_VERSION: '1.24'
 
 permissions:
   contents: write
@@ -299,7 +299,7 @@ jobs:
     - name: Create Dockerfile
       run: |
         cat > Dockerfile << 'EOF'
-        FROM golang:1.23-alpine AS builder
+        FROM golang:1.24-alpine AS builder
         
         WORKDIR /app
         COPY go.mod go.sum ./

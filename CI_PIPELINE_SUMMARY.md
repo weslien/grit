@@ -14,7 +14,7 @@ This document provides a complete overview of the comprehensive CI/CD pipeline a
 | Job | Purpose | Status Required | 
 |-----|---------|----------------|
 | **lint** | Code formatting, linting, imports | ✅ **REQUIRED** |
-| **test** | Unit tests (Go 1.22, 1.23) | ✅ **REQUIRED** |
+| **test** | Unit tests (Go 1.23, 1.24) | ✅ **REQUIRED** |
 | **build** | Cross-platform build verification | ✅ **REQUIRED** |
 | **security** | Security scanning & vulnerability detection | ✅ **REQUIRED** |
 | **integration** | End-to-end CLI testing | ✅ **REQUIRED** |
@@ -49,7 +49,7 @@ This document provides a complete overview of the comprehensive CI/CD pipeline a
 #### **Unit Testing**
 - **Coverage Requirement**: Minimum 60%
 - **Race Detection**: Enabled (`-race` flag)
-- **Go Versions**: 1.22, 1.23
+- **Go Versions**: 1.23, 1.24
 - **Reporting**: Codecov integration
 
 #### **Integration Testing**
@@ -87,7 +87,7 @@ This document provides a complete overview of the comprehensive CI/CD pipeline a
 - ✅ **Code Owner Review Required**
 - ✅ **All Status Checks Must Pass**:
   - `lint` - Linting and formatting
-  - `test` - Unit tests across Go versions
+  - `test` - Unit tests (Go 1.23, 1.24)
   - `build` - Cross-platform build verification
   - `security` - Security scanning
   - `integration` - End-to-end testing
