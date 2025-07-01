@@ -26,7 +26,6 @@ var buildCmd = &cobra.Command{
 	Short: "Build packages and their dependencies",
 	Long:  `Build packages respecting dependency order and utilizing build cache`,
 	Run: func(cmd *cobra.Command, args []string) {
-		// Rename the formatter variable to avoid conflict with fmt package
 		formatter := output.New()
 
 		cwd, err := os.Getwd()
@@ -36,7 +35,6 @@ var buildCmd = &cobra.Command{
 		}
 
 		formatter.Header("GRIT Build")
-		// In the buildCmd.Run function, after loading packages but before resolving dependencies
 		formatter.Section("Loading Packages")
 
 		pm := grit.NewPackageManager(cwd)
@@ -131,61 +129,105 @@ var buildCmd = &cobra.Command{
 
 		// In the buildCmd.Run function, add more detailed logging
 		formatter.Section("Building Packages")
-		formatter.Detail(fmt.Sprintf("Build order: %v", getPackageNames(buildOrder)))
+		packageNames := getPackageNames(buildOrder)
+		formatter.Detail(fmt.Sprintf("Build order: %s", strings.Join(packageNames, " → ")))
 
 		// Group packages by their dependency level
 		buildLevels := groupPackagesByLevel(buildOrder, formatter)
 		formatter.Detail(fmt.Sprintf("Build will execute in %d parallel stages", len(buildLevels)))
 
-		successCount := 0
-		for level, levelPackages := range buildLevels {
-		    formatter.Info(fmt.Sprintf("Building stage %d/%d with %d packages", level+1, len(buildLevels), len(levelPackages)))
-		    
-		    // Create a wait group for this level
-		    var wg sync.WaitGroup
-		    errChan := make(chan error, len(levelPackages))
-		    resultChan := make(chan string, len(levelPackages))
-		    
-		    // Launch goroutines for each package at this level
-		    for _, cfg := range levelPackages {
-		        if cfg.Package.Name == "" {
-		            formatter.Detail("Skipping unnamed package")
-		            continue // Skip root config
-		        }
-		        
-		        wg.Add(1)
-		        go func(cfg grit.Config) {
-		            defer wg.Done()
-		            err := executeBuild(cfg, cacheDir, noCache, formatter, cwd)
-		            if err != nil {
-		                errChan <- fmt.Errorf("error building %s: %w", cfg.Package.Name, err)
-		            } else {
-		                resultChan <- cfg.Package.Name
-		            }
-		        }(cfg)
-		    }
-		    
-		    // Wait for all builds at this level to complete
-		    wg.Wait()
-		    close(errChan)
-		    close(resultChan)
-		    
-		    // Check for errors
-		    if len(errChan) > 0 {
-		        for err := range errChan {
-		            formatter.Error(err.Error())
-		        }
-		        os.Exit(1)
-		    }
-		    
-		    // Count successes
-		    for range resultChan {
-		        successCount++
-		    }
+		// Create overall progress bar
+		totalPackages := len(packageNames)
+		if totalPackages > 0 {
+			progress := formatter.Progress(totalPackages, "Building packages")
+			
+			successCount := 0
+			failedPackages := []string{}
+			startTime := time.Now()
+			
+			for level, levelPackages := range buildLevels {
+				levelStart := time.Now()
+				formatter.Info(fmt.Sprintf("Stage %d/%d: Building %d packages in parallel", 
+					level+1, len(buildLevels), len(levelPackages)))
+				
+				// Create channels for this level
+				var wg sync.WaitGroup
+				type buildResult struct {
+					packageName string
+					success     bool
+					duration    time.Duration
+					err         error
+				}
+				resultChan := make(chan buildResult, len(levelPackages))
+				
+				// Launch goroutines for each package at this level
+				for _, cfg := range levelPackages {
+					if cfg.Package.Name == "" {
+						continue // Skip root config
+					}
+					
+					wg.Add(1)
+					go func(cfg grit.Config) {
+						defer wg.Done()
+						buildStart := time.Now()
+						err := executeBuild(cfg, cacheDir, noCache, formatter, cwd)
+						buildDuration := time.Since(buildStart)
+						
+						resultChan <- buildResult{
+							packageName: cfg.Package.Name,
+							success:     err == nil,
+							duration:    buildDuration,
+							err:         err,
+						}
+					}(cfg)
+				}
+				
+				// Wait for all builds at this level to complete
+				wg.Wait()
+				close(resultChan)
+				
+				// Process results
+				levelFailures := 0
+				for result := range resultChan {
+					progress.Add(1)
+					if result.success {
+						successCount++
+						formatter.Detail(fmt.Sprintf("✓ %s built in %v", result.packageName, result.duration))
+					} else {
+						levelFailures++
+						failedPackages = append(failedPackages, result.packageName)
+						formatter.Detail(fmt.Sprintf("✗ %s failed: %v", result.packageName, result.err))
+					}
+				}
+				
+				levelDuration := time.Since(levelStart)
+				if levelFailures > 0 {
+					formatter.Warning(fmt.Sprintf("Stage %d completed with %d failures (%v)", 
+						level+1, levelFailures, levelDuration))
+					break // Stop on first stage failure
+				} else {
+					formatter.Success(fmt.Sprintf("Stage %d completed successfully (%v)", 
+						level+1, levelDuration))
+				}
+			}
+			
+			progress.Close()
+			totalDuration := time.Since(startTime)
+			
+			// Enhanced summary
+			formatter.Summary(successCount, totalPackages, totalDuration)
+			
+			if len(failedPackages) > 0 {
+				formatter.NewLine()
+				formatter.Error("Failed packages:")
+				for _, pkg := range failedPackages {
+					formatter.Detail(fmt.Sprintf("• %s", pkg))
+				}
+				os.Exit(1)
+			}
+		} else {
+			formatter.Info("No packages to build")
 		}
-		
-		formatter.Section("Build Summary")
-		formatter.Success(fmt.Sprintf("Successfully built %d packages", successCount))
 	},
 }
 
@@ -322,8 +364,7 @@ func executeBuild(cfg grit.Config, cacheDir string, noCache bool, formatter *out
 		}
 	}
 
-	// Remove this duplicate line
-	// formatter.Info(fmt.Sprintf("Building package: %s", cfg.Package.Name))
+
 
 	// In the executeBuild function, fix the root config path
 	// Load the root config to get type information
