@@ -93,9 +93,6 @@ jobs:
     - name: Download dependencies
       run: go mod download
 
-    - name: Run tests
-      run: go test -v -race -coverprofile=coverage.out ./...
-
     - name: Run tests with coverage
       run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
 
@@ -104,9 +101,12 @@ jobs:
         go tool cover -func=coverage.out
         COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print substr($3, 1, length($3)-1)}')
         echo "Total coverage: $COVERAGE%"
-        if (( $(echo "$COVERAGE < 60" | bc -l) )); then
-          echo "Coverage is below 60%"
+        # Use awk for numeric comparison instead of bc
+        if awk "BEGIN {exit !($COVERAGE < 60)}"; then
+          echo "❌ Coverage is below 60% (found $COVERAGE%)"
           exit 1
+        else
+          echo "✅ Coverage meets minimum requirement (found $COVERAGE%)"
         fi
 
     - name: Upload coverage to Codecov
@@ -155,11 +155,24 @@ jobs:
         GOOS: ${{ matrix.goos }}
         GOARCH: ${{ matrix.goarch }}
       run: |
+        # Create dist directory
+        mkdir -p dist
+        
         BINARY_NAME=grit
         if [ "${{ matrix.goos }}" = "windows" ]; then
           BINARY_NAME=grit.exe
         fi
+        
+        echo "🔨 Building for ${{ matrix.goos }}/${{ matrix.goarch }}"
         go build -v -o dist/${BINARY_NAME}-${{ matrix.goos }}-${{ matrix.goarch }} ./main.go
+        
+        # Verify the binary was created
+        if [ -f "dist/${BINARY_NAME}-${{ matrix.goos }}-${{ matrix.goarch }}" ]; then
+          echo "✅ Successfully built dist/${BINARY_NAME}-${{ matrix.goos }}-${{ matrix.goarch }}"
+        else
+          echo "❌ Failed to create binary"
+          exit 1
+        fi
 
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
@@ -193,12 +206,13 @@ jobs:
     - name: Download dependencies
       run: go mod download
 
-    - name: Run Gosec Security Scanner
-      uses: securecodewarrior/github-action-gosec@master
-      with:
-        args: '-no-fail -fmt sarif -out gosec.sarif ./...'
+    - name: Install and run Gosec Security Scanner
+      run: |
+        go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest
+        gosec -fmt sarif -out gosec.sarif -stdout -verbose=text ./...
 
     - name: Upload SARIF file
+      if: always()
       uses: github/codeql-action/upload-sarif@v3
       with:
         sarif_file: gosec.sarif
@@ -239,18 +253,25 @@ jobs:
 
     - name: Test CLI commands
       run: |
+        echo "🧪 Testing CLI commands..."
+        
         # Test help command
+        echo "Testing help command..."
         ./grit --help
         
         # Test version command  
+        echo "Testing version command..."
         ./grit --version
         
         # Test completion generation
-        ./grit completion bash > /dev/null
-        ./grit completion zsh > /dev/null
-        ./grit completion fish > /dev/null
+        echo "Testing completion generation..."
+        ./grit completion bash > /dev/null && echo "✅ Bash completion works"
+        ./grit completion zsh > /dev/null && echo "✅ Zsh completion works"
+        ./grit completion fish > /dev/null && echo "✅ Fish completion works"
+        ./grit completion powershell > /dev/null && echo "✅ PowerShell completion works"
         
         # Test example output
+        echo "Testing example output..."
         ./grit example-output
 
     - name: Create test workspace
@@ -296,17 +317,23 @@ jobs:
     - name: Test workspace commands
       run: |
         cd test-workspace
+        echo "🧪 Testing workspace commands in test-workspace..."
         
         # Test graph command
-        ../grit graph
-        ../grit graph --format dot > /dev/null
+        echo "Testing graph command..."
+        ../grit graph && echo "✅ Graph command works"
+        ../grit graph --format dot > /dev/null && echo "✅ Graph DOT format works"
         
         # Test analyze command
-        ../grit analyze
-        ../grit analyze --json > /dev/null
+        echo "Testing analyze command..."
+        ../grit analyze && echo "✅ Analyze command works"
+        ../grit analyze --json > /dev/null && echo "✅ Analyze JSON output works"
         
         # Test dirty command
-        ../grit dirty
+        echo "Testing dirty command..."
+        ../grit dirty && echo "✅ Dirty command works"
+        
+        echo "✅ All workspace commands completed successfully"
 
   # Code quality checks
   quality:
@@ -336,26 +363,33 @@ jobs:
 
     - name: Check for ineffective assignments
       run: |
+        echo "🔍 Checking for ineffective assignments..."
         go install github.com/gordonklaus/ineffassign@latest
-        ineffassign ./...
+        ineffassign ./... && echo "✅ No ineffective assignments found"
 
     - name: Check for unused code
       run: |
+        echo "🔍 Checking for unused code..."
         go install honnef.co/go/tools/cmd/staticcheck@latest
-        staticcheck ./...
+        staticcheck ./... && echo "✅ No unused code found"
 
     - name: Check for misspellings
       run: |
+        echo "🔍 Checking for misspellings..."
         go install github.com/client9/misspell/cmd/misspell@latest
-        misspell -error .
+        misspell -error . && echo "✅ No misspellings found"
 
     - name: Verify go.mod is tidy
       run: |
+        echo "🔍 Checking if go.mod is tidy..."
         go mod tidy
         if ! git diff --quiet; then
-          echo "go.mod is not tidy"
+          echo "❌ go.mod is not tidy. Please run 'go mod tidy' locally."
+          echo "Differences found:"
           git diff
           exit 1
+        else
+          echo "✅ go.mod is tidy"
         fi
 
   # Dependency and license checks

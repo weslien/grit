@@ -18,8 +18,8 @@ jobs:
     name: Create Release
     runs-on: ubuntu-latest
     outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
       tag_name: ${{ steps.get_tag.outputs.tag_name }}
+      release_id: ${{ steps.create_release.outputs.id }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -54,15 +54,14 @@ jobs:
 
     - name: Create Release
       id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.get_tag.outputs.tag_name }}
-        release_name: Release ${{ steps.get_tag.outputs.tag_name }}
+        name: Release ${{ steps.get_tag.outputs.tag_name }}
         body_path: CHANGELOG.md
         draft: false
         prerelease: ${{ contains(steps.get_tag.outputs.tag_name, '-') }}
+        generate_release_notes: true
 
   # Build and upload release binaries
   build-and-upload:
@@ -119,8 +118,26 @@ jobs:
         GOARCH: ${{ matrix.goarch }}
         CGO_ENABLED: 0
       run: |
+        echo "🔨 Building ${{ matrix.asset_name }} for ${{ matrix.goos }}/${{ matrix.goarch }}"
         mkdir -p dist
-        go build -v -ldflags="-s -w -X 'main.version=${{ needs.create-release.outputs.tag_name }}' -X 'main.commit=${{ github.sha }}' -X 'main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)'" -o dist/${{ matrix.asset_name }} ./main.go
+        
+        # Build with version information
+        go build -v \
+          -ldflags="-s -w -X 'main.version=${{ needs.create-release.outputs.tag_name }}' -X 'main.commit=${{ github.sha }}' -X 'main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)'" \
+          -o dist/${{ matrix.asset_name }} ./main.go
+        
+        # Verify the binary was created and works
+        if [ -f "dist/${{ matrix.asset_name }}" ]; then
+          echo "✅ Successfully built dist/${{ matrix.asset_name }}"
+          # Test the binary (skip for cross-compiled binaries that can't run on current platform)
+          if [ "${{ matrix.goos }}" = "linux" ] && [ "${{ matrix.goarch }}" = "amd64" ]; then
+            chmod +x dist/${{ matrix.asset_name }}
+            dist/${{ matrix.asset_name }} --version && echo "✅ Binary test passed"
+          fi
+        else
+          echo "❌ Failed to create binary"
+          exit 1
+        fi
 
     - name: Create package
       run: |
@@ -139,23 +156,27 @@ jobs:
         
         # Create installation script for Unix-like systems
         if [ "${{ matrix.goos }}" != "windows" ]; then
-          cat > "$PACKAGE_NAME/install.sh" << 'EOF'
+          cat > "$PACKAGE_NAME/install.sh" << EOF
         #!/bin/bash
         set -e
         
-        BINARY_NAME="grit"
+        BINARY_NAME="${{ matrix.asset_name }}"
+        TARGET_NAME="grit"
         INSTALL_DIR="/usr/local/bin"
         
+        echo "Installing Grit monorepo tool..."
+        
         # Check if running as root or with sudo
-        if [[ $EUID -eq 0 ]]; then
-            cp "$BINARY_NAME" "$INSTALL_DIR/"
-            chmod +x "$INSTALL_DIR/$BINARY_NAME"
-            echo "✅ Grit installed to $INSTALL_DIR/$BINARY_NAME"
+        if [[ \$EUID -eq 0 ]]; then
+            cp "\$BINARY_NAME" "\$INSTALL_DIR/\$TARGET_NAME"
+            chmod +x "\$INSTALL_DIR/\$TARGET_NAME"
+            echo "✅ Grit installed to \$INSTALL_DIR/\$TARGET_NAME"
+            echo "💡 You can now run 'grit --help' to get started"
         else
-            echo "⚠️  Please run with sudo to install to $INSTALL_DIR"
+            echo "⚠️  Please run with sudo to install to \$INSTALL_DIR"
             echo "💡 Or copy the binary manually:"
-            echo "   sudo cp $BINARY_NAME $INSTALL_DIR/"
-            echo "   sudo chmod +x $INSTALL_DIR/$BINARY_NAME"
+            echo "   sudo cp \$BINARY_NAME \$INSTALL_DIR/\$TARGET_NAME"
+            echo "   sudo chmod +x \$INSTALL_DIR/\$TARGET_NAME"
         fi
         EOF
           chmod +x "$PACKAGE_NAME/install.sh"
@@ -173,14 +194,10 @@ jobs:
         fi
 
     - name: Upload Release Asset
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      uses: softprops/action-gh-release@v2
       with:
-        upload_url: ${{ needs.create-release.outputs.upload_url }}
-        asset_path: dist/${{ env.ASSET_PATH }}
-        asset_name: ${{ env.ASSET_PATH }}
-        asset_content_type: ${{ env.ASSET_CONTENT_TYPE }}
+        tag_name: ${{ needs.create-release.outputs.tag_name }}
+        files: dist/${{ env.ASSET_PATH }}
 
   # Generate completion scripts and upload as assets
   generate-completions:
@@ -198,15 +215,23 @@ jobs:
 
     - name: Build grit
       run: |
+        echo "🔨 Building grit for completion generation..."
         go build -o grit main.go
+        chmod +x grit
+        echo "✅ Built grit successfully"
 
     - name: Generate completion scripts
       run: |
+        echo "🔧 Generating completion scripts..."
         mkdir -p completions
-        ./grit completion bash > completions/grit.bash
-        ./grit completion zsh > completions/_grit
-        ./grit completion fish > completions/grit.fish
-        ./grit completion powershell > completions/grit.ps1
+        
+        ./grit completion bash > completions/grit.bash && echo "✅ Generated Bash completion"
+        ./grit completion zsh > completions/_grit && echo "✅ Generated Zsh completion"
+        ./grit completion fish > completions/grit.fish && echo "✅ Generated Fish completion"
+        ./grit completion powershell > completions/grit.ps1 && echo "✅ Generated PowerShell completion"
+        
+        echo "📊 Completion files generated:"
+        ls -la completions/
         
         # Create installation instructions
         cat > completions/README.md << 'EOF'
@@ -257,14 +282,10 @@ jobs:
         tar -czf grit-completions-${{ needs.create-release.outputs.tag_name }}.tar.gz completions/
 
     - name: Upload Completions
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      uses: softprops/action-gh-release@v2
       with:
-        upload_url: ${{ needs.create-release.outputs.upload_url }}
-        asset_path: grit-completions-${{ needs.create-release.outputs.tag_name }}.tar.gz
-        asset_name: grit-completions-${{ needs.create-release.outputs.tag_name }}.tar.gz
-        asset_content_type: application/gzip
+        tag_name: ${{ needs.create-release.outputs.tag_name }}
+        files: grit-completions-${{ needs.create-release.outputs.tag_name }}.tar.gz
 
   # Create Docker image (optional)
   docker:
