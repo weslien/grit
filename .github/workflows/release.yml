@@ -5,94 +5,323 @@ on:
     tags:
       - 'v*'
 
+env:
+  GO_VERSION: '1.23'
+
+permissions:
+  contents: write
+  packages: write
+
 jobs:
-  build:
-    name: Build Multiplatform Binaries
+  # Create GitHub release with release notes
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      tag_name: ${{ steps.get_tag.outputs.tag_name }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Get tag name
+      id: get_tag
+      run: echo "tag_name=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+    - name: Generate changelog
+      id: changelog
+      run: |
+        # Get the previous tag
+        PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+        
+        # Generate changelog
+        echo "## Changes in ${{ steps.get_tag.outputs.tag_name }}" > CHANGELOG.md
+        echo "" >> CHANGELOG.md
+        
+        if [ -n "$PREV_TAG" ]; then
+          echo "### Commits since $PREV_TAG:" >> CHANGELOG.md
+          git log --oneline --no-merges $PREV_TAG..HEAD >> CHANGELOG.md
+        else
+          echo "### All commits:" >> CHANGELOG.md
+          git log --oneline --no-merges >> CHANGELOG.md
+        fi
+        
+        echo "" >> CHANGELOG.md
+        echo "### Full Changelog" >> CHANGELOG.md
+        echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/$PREV_TAG...${{ steps.get_tag.outputs.tag_name }}" >> CHANGELOG.md
+
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.get_tag.outputs.tag_name }}
+        release_name: Release ${{ steps.get_tag.outputs.tag_name }}
+        body_path: CHANGELOG.md
+        draft: false
+        prerelease: ${{ contains(steps.get_tag.outputs.tag_name, '-') }}
+
+  # Build and upload release binaries
+  build-and-upload:
+    name: Build and Upload
+    needs: create-release
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        goos: [darwin, linux, windows]
-        goarch: [amd64, arm64]
+        include:
+          - goos: linux
+            goarch: amd64
+            asset_name: grit-linux-amd64
+          - goos: linux
+            goarch: arm64
+            asset_name: grit-linux-arm64
+          - goos: darwin
+            goarch: amd64
+            asset_name: grit-darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            asset_name: grit-darwin-arm64
+          - goos: windows
+            goarch: amd64
+            asset_name: grit-windows-amd64.exe
+          - goos: freebsd
+            goarch: amd64
+            asset_name: grit-freebsd-amd64
+
     steps:
-      - uses: actions/checkout@v4
-      
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.21'
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      - name: Build
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-        run: |
-          OUTPUT_NAME="grit-${{ matrix.goos }}-${{ matrix.goarch }}"
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            OUTPUT_NAME="$OUTPUT_NAME.exe"
-          fi
-          go build -o $OUTPUT_NAME
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
 
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: binaries
-          path: |
-            grit-*
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
 
-  release:
-    name: Create Release
-    needs: [build]
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Build binary
+      env:
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+        CGO_ENABLED: 0
+      run: |
+        mkdir -p dist
+        go build -v -ldflags="-s -w -X 'main.version=${{ needs.create-release.outputs.tag_name }}' -X 'main.commit=${{ github.sha }}' -X 'main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)'" -o dist/${{ matrix.asset_name }} ./main.go
+
+    - name: Create package
+      run: |
+        cd dist
+        
+        # Create a directory for packaging
+        PACKAGE_NAME="grit-${{ needs.create-release.outputs.tag_name }}-${{ matrix.goos }}-${{ matrix.goarch }}"
+        mkdir -p "$PACKAGE_NAME"
+        
+        # Copy binary
+        cp ${{ matrix.asset_name }} "$PACKAGE_NAME/"
+        
+        # Copy additional files
+        cp ../README.md "$PACKAGE_NAME/"
+        cp ../IMPROVEMENTS_SUMMARY.md "$PACKAGE_NAME/"
+        
+        # Create installation script for Unix-like systems
+        if [ "${{ matrix.goos }}" != "windows" ]; then
+          cat > "$PACKAGE_NAME/install.sh" << 'EOF'
+        #!/bin/bash
+        set -e
+        
+        BINARY_NAME="grit"
+        INSTALL_DIR="/usr/local/bin"
+        
+        # Check if running as root or with sudo
+        if [[ $EUID -eq 0 ]]; then
+            cp "$BINARY_NAME" "$INSTALL_DIR/"
+            chmod +x "$INSTALL_DIR/$BINARY_NAME"
+            echo "✅ Grit installed to $INSTALL_DIR/$BINARY_NAME"
+        else
+            echo "⚠️  Please run with sudo to install to $INSTALL_DIR"
+            echo "💡 Or copy the binary manually:"
+            echo "   sudo cp $BINARY_NAME $INSTALL_DIR/"
+            echo "   sudo chmod +x $INSTALL_DIR/$BINARY_NAME"
+        fi
+        EOF
+          chmod +x "$PACKAGE_NAME/install.sh"
+        fi
+        
+        # Create archive
+        if [ "${{ matrix.goos }}" = "windows" ]; then
+          zip -r "${PACKAGE_NAME}.zip" "$PACKAGE_NAME"
+          echo "ASSET_PATH=${PACKAGE_NAME}.zip" >> $GITHUB_ENV
+          echo "ASSET_CONTENT_TYPE=application/zip" >> $GITHUB_ENV
+        else
+          tar -czf "${PACKAGE_NAME}.tar.gz" "$PACKAGE_NAME"
+          echo "ASSET_PATH=${PACKAGE_NAME}.tar.gz" >> $GITHUB_ENV
+          echo "ASSET_CONTENT_TYPE=application/gzip" >> $GITHUB_ENV
+        fi
+
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: dist/${{ env.ASSET_PATH }}
+        asset_name: ${{ env.ASSET_PATH }}
+        asset_content_type: ${{ env.ASSET_CONTENT_TYPE }}
+
+  # Generate completion scripts and upload as assets
+  generate-completions:
+    name: Generate Completions
+    needs: create-release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: binaries
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            grit-*
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
 
-  homebrew:
-    name: Update Homebrew Formula
-    needs: [release]
+    - name: Build grit
+      run: |
+        go build -o grit main.go
+
+    - name: Generate completion scripts
+      run: |
+        mkdir -p completions
+        ./grit completion bash > completions/grit.bash
+        ./grit completion zsh > completions/_grit
+        ./grit completion fish > completions/grit.fish
+        ./grit completion powershell > completions/grit.ps1
+        
+        # Create installation instructions
+        cat > completions/README.md << 'EOF'
+        # Grit Shell Completions
+        
+        This directory contains shell completion scripts for Grit.
+        
+        ## Bash
+        ```bash
+        # For current session
+        source grit.bash
+        
+        # For all sessions (Linux)
+        sudo cp grit.bash /etc/bash_completion.d/
+        
+        # For all sessions (macOS with Homebrew)
+        cp grit.bash $(brew --prefix)/etc/bash_completion.d/
+        ```
+        
+        ## Zsh
+        ```bash
+        # Ensure completions are enabled
+        echo "autoload -U compinit; compinit" >> ~/.zshrc
+        
+        # Install completion
+        cp _grit "${fpath[1]}/"
+        ```
+        
+        ## Fish
+        ```bash
+        # For current session
+        source grit.fish
+        
+        # For all sessions
+        cp grit.fish ~/.config/fish/completions/
+        ```
+        
+        ## PowerShell
+        ```powershell
+        # For current session
+        grit.ps1
+        
+        # For all sessions, add to PowerShell profile
+        ```
+        EOF
+        
+        # Create archive
+        tar -czf grit-completions-${{ needs.create-release.outputs.tag_name }}.tar.gz completions/
+
+    - name: Upload Completions
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: grit-completions-${{ needs.create-release.outputs.tag_name }}.tar.gz
+        asset_name: grit-completions-${{ needs.create-release.outputs.tag_name }}.tar.gz
+        asset_content_type: application/gzip
+
+  # Create Docker image (optional)
+  docker:
+    name: Build Docker Image
+    needs: create-release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: gustav-weslien/homebrew-tap
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          path: homebrew-tap
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      - name: Generate Formula
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          SHA256=$(sha256sum grit-darwin-amd64 | awk '{print $1}')
-          
-          cat > homebrew-tap/Formula/grit.rb <<EOF
-          class Grit < Formula
-            desc "Go-based monorepo tool"
-            homepage "https://github.com/gustav-weslien/grit"
-            url "https://github.com/gustav-weslien/grit/releases/download/v#{version}/grit-darwin-amd64"
-            sha256 "$SHA256"
-            license "MIT"
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
 
-            def install
-              bin.install "grit-darwin-amd64" => "grit"
-            end
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
 
-            test do
-              system "#{bin}/grit", "--version"
-            end
-          end
-          EOF
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ghcr.io/${{ github.repository }}
+        tags: |
+          type=ref,event=tag
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
 
-      - name: Commit and Push
-        run: |
-          cd homebrew-tap
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          git add Formula/grit.rb
-          git commit -m "Update grit to v${VERSION}"
-          git push
+    - name: Create Dockerfile
+      run: |
+        cat > Dockerfile << 'EOF'
+        FROM golang:1.23-alpine AS builder
+        
+        WORKDIR /app
+        COPY go.mod go.sum ./
+        RUN go mod download
+        
+        COPY . .
+        RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o grit main.go
+        
+        FROM alpine:latest
+        RUN apk --no-cache add ca-certificates git
+        WORKDIR /root/
+        
+        COPY --from=builder /app/grit /usr/local/bin/
+        
+        ENTRYPOINT ["grit"]
+        EOF
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        platforms: linux/amd64,linux/arm64
