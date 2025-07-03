@@ -1,0 +1,98 @@
+types:
+  lib:
+    package_dir: "packages/lib"
+    build_dir: "build/lib"
+    coverage_dir: "coverage/lib"
+    targets:
+      build: "go build -o build/ ./..."
+      test: "go test -v ./..."
+      lint: "golangci-lint run"
+      coverage: "go test -coverprofile=coverage.out ./..."
+      clean: "rm -rf build/ coverage/"
+    can_depend_on: []
+  
+  app:
+    package_dir: "packages/app"
+    build_dir: "build/app"
+    coverage_dir: "coverage/app"
+    targets:
+      build: "go build -o build/ ./..."
+      test: "go test -v ./..."
+      lint: "golangci-lint run"
+      run: "./build/main"
+      install: "go install ./..."
+      coverage: "go test -coverprofile=coverage.out ./..."
+      clean: "rm -rf build/ coverage/"
+    can_depend_on: ["lib"]
+  
+  service:
+    package_dir: "packages/service"
+    build_dir: "build/service"
+    coverage_dir: "coverage/service"
+    targets:
+      build: "go build -o build/ ./..."
+      test: "go test -v ./..."
+      lint: "golangci-lint run"
+      run: "docker-compose up"
+      deploy: "kubectl apply -f k8s/"
+      coverage: "go test -coverprofile=coverage.out ./..."
+      clean: "rm -rf build/ coverage/"
+    can_depend_on: ["lib", "app"]
+  
+  frontend:
+    package_dir: "packages/frontend"
+    build_dir: "dist"
+    coverage_dir: "coverage"
+    targets:
+      build: "npm run build"
+      test: "npm test"
+      lint: "npm run lint"
+      dev: "npm run dev"
+      serve: "npm run serve"
+      coverage: "npm run test:coverage"
+      clean: "rm -rf dist/ node_modules/ coverage/"
+    can_depend_on: []
+  
+  python:
+    package_dir: "packages/python"
+    build_dir: "dist"
+    coverage_dir: "htmlcov"
+    targets:
+      build: "python -m build"
+      test: "pytest"
+      lint: "flake8 . && mypy ."
+      install: "pip install -e ."
+      coverage: "pytest --cov=. --cov-report=html"
+      clean: "rm -rf dist/ build/ *.egg-info/ htmlcov/ .pytest_cache/"
+    can_depend_on: ["lib"]
+  
+  rust:
+    package_dir: "packages/rust"
+    build_dir: "target"
+    coverage_dir: "target/tarpaulin"
+    targets:
+      build: "cargo build --release"
+      test: "cargo test"
+      lint: "cargo clippy -- -D warnings"
+      run: "cargo run"
+      coverage: "cargo tarpaulin --out Html"
+      clean: "cargo clean"
+    can_depend_on: []
+
+# Global targets that apply to all packages
+targets:
+  build: "echo 'Global build target'"
+  test: "echo 'Global test target'"
+  lint: "echo 'Global lint target'"
+  coverage: "echo 'Global coverage target'"
+  clean: "echo 'Global clean target'"
+  all: "echo 'Running all targets'"
+  install: "echo 'Global install target'"
+  release: "echo 'Global release target'"
+
+repo:
+  name: "grit-test-repo"
+  version: "0.1.0"
+  url: "https://github.com/weslien/grit-repo"
+  license: "MIT"
+  owner: "weslien"

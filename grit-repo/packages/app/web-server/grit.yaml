@@ -1,0 +1,17 @@
+targets:
+  build: "go build -o build/web-server ./cmd/server"
+  test: "go test -v ./..."
+  lint: "golangci-lint run ./..."
+  coverage: "go test -coverprofile=coverage.out ./... && go tool cover -html=coverage.out -o coverage.html"
+  clean: "rm -rf build/ coverage.out coverage.html"
+  run: "./build/web-server"
+  dev: "go run ./cmd/server"
+  install: "go install ./cmd/server"
+  docker-build: "docker build -t web-server ."
+  docker-run: "docker run -p 8080:8080 web-server"
+
+package:
+  name: "web-server"
+  version: "1.0.0"
+  dependencies: ["core", "validation"]
+  hash: ""

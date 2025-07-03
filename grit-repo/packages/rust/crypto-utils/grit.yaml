@@ -1,0 +1,20 @@
+targets:
+  build: "cargo build --release"
+  test: "cargo test"
+  lint: "cargo clippy -- -D warnings"
+  coverage: "cargo tarpaulin --out Html --output-dir target/tarpaulin"
+  clean: "cargo clean"
+  run: "cargo run"
+  check: "cargo check"
+  fmt: "cargo fmt"
+  fmt-check: "cargo fmt -- --check"
+  audit: "cargo audit"
+  bench: "cargo bench"
+  doc: "cargo doc --open"
+  update: "cargo update"
+
+package:
+  name: "crypto-utils"
+  version: "0.3.1"
+  dependencies: []
+  hash: ""

@@ -1,0 +1,21 @@
+targets:
+  build: "python -m build"
+  test: "pytest -v --tb=short"
+  lint: "flake8 . && black --check . && isort --check-only ."
+  coverage: "pytest --cov=src --cov-report=html --cov-report=term"
+  clean: "rm -rf dist/ build/ *.egg-info/ htmlcov/ .pytest_cache/ __pycache__/ models/checkpoints/"
+  install: "pip install -e ."
+  format: "black . && isort ."
+  type-check: "mypy src/"
+  train: "python src/train.py"
+  evaluate: "python src/evaluate.py"
+  predict: "python src/predict.py --input data/test.json"
+  validate-model: "python src/validate_model.py"
+  export-onnx: "python src/export_onnx.py"
+  benchmark: "python src/benchmark.py"
+
+package:
+  name: "ml-models"
+  version: "1.5.2"
+  dependencies: []
+  hash: ""

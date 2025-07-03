@@ -1,0 +1,17 @@
+targets:
+  build: "go build -o build/worker ./cmd/worker"
+  test: "go test -v ./..."
+  lint: "golangci-lint run ./..."
+  coverage: "go test -coverprofile=coverage.out ./... && go tool cover -html=coverage.out -o coverage.html"
+  clean: "rm -rf build/ coverage.out coverage.html"
+  run: "./build/worker"
+  dev: "go run ./cmd/worker"
+  install: "go install ./cmd/worker"
+  queue-test: "go test -tags=queue ./..."
+  metrics: "go run ./cmd/metrics"
+
+package:
+  name: "worker"
+  version: "1.2.3"
+  dependencies: ["core"]
+  hash: ""

@@ -1,0 +1,20 @@
+targets:
+  build: "go build -o build/payment-service ./cmd/payment"
+  test: "go test -v ./..."
+  lint: "golangci-lint run ./..."
+  coverage: "go test -coverprofile=coverage.out ./... && go tool cover -html=coverage.out -o coverage.html"
+  clean: "rm -rf build/ coverage.out coverage.html"
+  run: "./build/payment-service"
+  dev: "go run ./cmd/payment"
+  docker-build: "docker build -t payment-service:latest ."
+  docker-run: "docker run -p 9001:9001 payment-service:latest"
+  compliance-check: "go run ./cmd/compliance"
+  audit-log: "go run ./cmd/audit"
+  stress-test: "go test -tags=stress ./..."
+  pci-scan: "nessus-scan payment-service"
+
+package:
+  name: "payment-service"
+  version: "1.8.2"
+  dependencies: ["core", "validation"]
+  hash: ""

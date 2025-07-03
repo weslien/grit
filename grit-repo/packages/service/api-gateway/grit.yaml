@@ -1,0 +1,21 @@
+targets:
+  build: "go build -o build/api-gateway ./cmd/gateway"
+  test: "go test -v ./..."
+  lint: "golangci-lint run ./..."
+  coverage: "go test -coverprofile=coverage.out ./... && go tool cover -html=coverage.out -o coverage.html"
+  clean: "rm -rf build/ coverage.out coverage.html"
+  run: "./build/api-gateway"
+  dev: "go run ./cmd/gateway"
+  docker-build: "docker build -t api-gateway:latest ."
+  docker-run: "docker run -p 8080:8080 api-gateway:latest"
+  docker-push: "docker push api-gateway:latest"
+  k8s-deploy: "kubectl apply -f k8s/"
+  k8s-delete: "kubectl delete -f k8s/"
+  helm-install: "helm install api-gateway ./helm-chart"
+  load-test: "k6 run scripts/load-test.js"
+
+package:
+  name: "api-gateway"
+  version: "3.0.0"
+  dependencies: ["core", "validation"]
+  hash: ""

@@ -1,0 +1,20 @@
+targets:
+  build: "npm run build"
+  test: "npm test -- --watchAll=false"
+  lint: "npm run lint && npm run lint:css"
+  coverage: "npm run test:coverage"
+  clean: "rm -rf dist/ node_modules/ coverage/"
+  dev: "npm run dev"
+  serve: "npm run serve"
+  type-check: "npm run type-check"
+  format: "npm run format"
+  storybook: "npm run storybook"
+  build-storybook: "npm run build-storybook"
+  e2e: "npm run test:e2e"
+  lighthouse: "npm run lighthouse"
+
+package:
+  name: "admin-dashboard"
+  version: "4.2.1"
+  dependencies: []
+  hash: ""

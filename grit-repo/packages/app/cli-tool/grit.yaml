@@ -1,0 +1,16 @@
+targets:
+  build: "go build -o build/cli-tool ./cmd/cli"
+  test: "go test -v ./..."
+  lint: "golangci-lint run ./..."
+  coverage: "go test -coverprofile=coverage.out ./... && go tool cover -html=coverage.out -o coverage.html"
+  clean: "rm -rf build/ coverage.out coverage.html"
+  run: "./build/cli-tool"
+  install: "go install ./cmd/cli"
+  completion: "./build/cli-tool completion bash > cli-tool-completion.bash"
+  integration-test: "go test -tags=integration ./..."
+
+package:
+  name: "cli-tool"
+  version: "2.1.0"
+  dependencies: ["utils"]
+  hash: ""

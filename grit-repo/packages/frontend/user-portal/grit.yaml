@@ -1,0 +1,20 @@
+targets:
+  build: "npm run build"
+  test: "npm run test:unit"
+  lint: "npm run lint"
+  coverage: "npm run test:coverage"
+  clean: "rm -rf dist/ node_modules/ coverage/"
+  dev: "npm run serve"
+  preview: "npm run preview"
+  type-check: "npm run type-check"
+  format: "npm run format"
+  analyze: "npm run analyze"
+  component-test: "npm run test:component"
+  visual-test: "npm run test:visual"
+  pwa-build: "npm run build:pwa"
+
+package:
+  name: "user-portal"
+  version: "3.1.4"
+  dependencies: []
+  hash: ""

@@ -1,0 +1,19 @@
+targets:
+  build: "python -m build"
+  test: "pytest -v"
+  lint: "flake8 . && black --check . && isort --check-only ."
+  coverage: "pytest --cov=src --cov-report=html --cov-report=term"
+  clean: "rm -rf dist/ build/ *.egg-info/ htmlcov/ .pytest_cache/ __pycache__/"
+  install: "pip install -e ."
+  format: "black . && isort ."
+  type-check: "mypy src/"
+  security: "bandit -r src/"
+  docs: "sphinx-build -b html docs/ docs/_build/"
+  notebook: "jupyter lab"
+  profile: "python -m cProfile -o profile.stats src/main.py"
+
+package:
+  name: "data-processor"
+  version: "2.3.0"
+  dependencies: ["utils"]
+  hash: ""

@@ -1,0 +1,14 @@
+targets:
+  build: "go build -o build/ ./..."
+  test: "go test -v ./..."
+  lint: "golangci-lint run ./..."
+  coverage: "go test -coverprofile=coverage.out ./... && go tool cover -html=coverage.out -o coverage.html"
+  clean: "rm -rf build/ coverage.out coverage.html"
+  validate-schemas: "go run cmd/validate/main.go schemas/"
+  generate: "go generate ./..."
+
+package:
+  name: "validation"
+  version: "0.1.5"
+  dependencies: ["utils"]
+  hash: ""

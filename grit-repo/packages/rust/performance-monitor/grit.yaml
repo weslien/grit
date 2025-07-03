@@ -1,0 +1,21 @@
+targets:
+  build: "cargo build --release"
+  test: "cargo test"
+  lint: "cargo clippy -- -D warnings"
+  coverage: "cargo tarpaulin --out Html --output-dir target/tarpaulin"
+  clean: "cargo clean"
+  run: "cargo run --release"
+  check: "cargo check"
+  fmt: "cargo fmt"
+  fmt-check: "cargo fmt -- --check"
+  bench: "cargo bench"
+  flamegraph: "cargo flamegraph --bin performance-monitor"
+  profile: "perf record -g cargo run --release"
+  memory-check: "valgrind --tool=memcheck target/release/performance-monitor"
+  optimize: "cargo build --release --target-cpu=native"
+
+package:
+  name: "performance-monitor"
+  version: "2.0.0"
+  dependencies: []
+  hash: ""

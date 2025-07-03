@@ -1,0 +1,13 @@
+targets:
+  build: "go build -o build/ ./..."
+  test: "go test -v ./..."
+  lint: "golangci-lint run ./..."
+  coverage: "go test -coverprofile=coverage.out ./... && go tool cover -html=coverage.out -o coverage.html"
+  clean: "rm -rf build/ coverage.out coverage.html"
+  benchmark: "go test -bench=. -benchmem ./..."
+
+package:
+  name: "utils"
+  version: "0.1.0"
+  dependencies: []
+  hash: ""

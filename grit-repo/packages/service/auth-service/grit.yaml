@@ -1,0 +1,20 @@
+targets:
+  build: "go build -o build/auth-service ./cmd/auth"
+  test: "go test -v ./..."
+  lint: "golangci-lint run ./..."
+  coverage: "go test -coverprofile=coverage.out ./... && go tool cover -html=coverage.out -o coverage.html"
+  clean: "rm -rf build/ coverage.out coverage.html"
+  run: "./build/auth-service"
+  dev: "go run ./cmd/auth"
+  docker-build: "docker build -t auth-service:latest ."
+  docker-run: "docker run -p 9000:9000 auth-service:latest"
+  security-scan: "trivy image auth-service:latest"
+  migrate: "go run ./cmd/migrate"
+  seed-data: "go run ./cmd/seed"
+  e2e-test: "go test -tags=e2e ./..."
+
+package:
+  name: "auth-service"
+  version: "2.5.1"
+  dependencies: ["core"]
+  hash: ""
